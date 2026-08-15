@@ -115,7 +115,7 @@ constructor(
                 return@Factory dataSpec
             }
 
-            songUrlCache[mediaId]?.takeIf { it.second < System.currentTimeMillis() }?.let {
+            songUrlCache[mediaId]?.takeIf { it.second > System.currentTimeMillis() }?.let {
                 return@Factory dataSpec.withUri(it.first.toUri())
             }
 
@@ -181,14 +181,14 @@ constructor(
 
             // For YouTube streams: append the &range= param so the download cache can
             // handle progressive HTTP range requests. For JioSaavn streams the CDN
-            // doesn't need it and contentLength is null, so skip it.
+            // natively supports progressive range requests without it.
             val streamUrl = if (playbackData.isSaavnStream) {
                 playbackData.streamUrl
             } else {
                 "${playbackData.streamUrl}&range=0-${format.contentLength ?: 10_000_000}"
             }
 
-            songUrlCache[mediaId] = streamUrl to playbackData.streamExpiresInSeconds * 1000L
+            songUrlCache[mediaId] = streamUrl to (System.currentTimeMillis() + (playbackData.streamExpiresInSeconds * 1000L))
             dataSpec.withUri(streamUrl.toUri())
         }
 

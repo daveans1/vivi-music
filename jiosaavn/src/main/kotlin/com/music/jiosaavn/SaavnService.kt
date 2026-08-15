@@ -164,15 +164,38 @@ object SaavnService {
         explicitNulls     = false
     }
 
+    /**
+     * Unescape common HTML entities returned in JioSaavn JSON responses.
+     */
+    fun decodeHtmlEntities(input: String?): String {
+        if (input.isNullOrBlank()) return ""
+        return input
+            .replace("&quot;", "\"")
+            .replace("&amp;", "&")
+            .replace("&#039;", "'")
+            .replace("&apos;", "'")
+            .replace("&#x27;", "'")
+            .replace("&lt;", "<")
+            .replace("&gt;", ">")
+            .replace("&nbsp;", " ")
+            .replace("&#8217;", "’")
+            .replace("&#8216;", "‘")
+            .replace("&#8220;", "“")
+            .replace("&#8221;", "”")
+            .replace("&#8211;", "–")
+            .replace("&#8212;", "—")
+            .trim()
+    }
+
     private val client by lazy {
         HttpClient(CIO) {
             install(ContentNegotiation) { json(json) }
             install(HttpTimeout) {
                 // Keep timeouts short so that a slow/unavailable Saavn response
                 // falls back to YouTube quickly.
-                requestTimeoutMillis = 6_000
-                connectTimeoutMillis = 4_000
-                socketTimeoutMillis  = 6_000
+                requestTimeoutMillis = 4_000
+                connectTimeoutMillis = 3_000
+                socketTimeoutMillis  = 4_000
             }
             defaultRequest {
                 url(BASE_URL)
@@ -212,6 +235,7 @@ object SaavnService {
 
     /**
      * Decode and build direct CDN download URLs for different audio bitrates.
+     * Uses anchored regex replacement to prevent replacing directory hashes containing numbers like '96'.
      */
     private fun createDownloadLinks(encryptedUrl: String): List<SaavnDownloadUrl> {
         Log.d(TAG, "createDownloadLinks: starting decryption for URL...")
@@ -227,14 +251,18 @@ object SaavnService {
             Pair("_320", "320kbps")
         )
 
-        val suffixRegex = Regex("_(48|96|160|320)\\.(mp4|aac|mp3)$")
+        val suffixRegex = Regex("""_(?:48|96|160|320)\.(mp4|aac|mp3)$""")
+        val terminal96Regex = Regex("""_96(?=\.[a-zA-Z0-9]+$)""")
+
         val generatedUrls = qualities.map { (suffix, bitrate) ->
             val url = if (decryptedUrl.contains(suffixRegex)) {
                 decryptedUrl.replace(suffixRegex) { match ->
-                    "${suffix}.${match.groupValues[2]}"
+                    "${suffix}.${match.groupValues[1]}"
                 }
+            } else if (decryptedUrl.contains(terminal96Regex)) {
+                decryptedUrl.replace(terminal96Regex, suffix)
             } else {
-                decryptedUrl.replace("_96", suffix)
+                decryptedUrl
             }
             SaavnDownloadUrl(quality = bitrate, url = url)
         }
@@ -262,18 +290,18 @@ object SaavnService {
      */
     private fun mapRawToSaavnSong(raw: RawSongItem): SaavnSong {
         val primaryArtists = raw.moreInfo.artistMap.primaryArtists.map {
-            SaavnArtistItem(id = it.id, name = it.name)
+            SaavnArtistItem(id = it.id, name = decodeHtmlEntities(it.name))
         }
         val featuredArtists = raw.moreInfo.artistMap.featuredArtists.map {
-            SaavnArtistItem(id = it.id, name = it.name)
+            SaavnArtistItem(id = it.id, name = decodeHtmlEntities(it.name))
         }
         val allArtists = raw.moreInfo.artistMap.artists.map {
-            SaavnArtistItem(id = it.id, name = it.name)
+            SaavnArtistItem(id = it.id, name = decodeHtmlEntities(it.name))
         }
 
         return SaavnSong(
             id = raw.id,
-            name = raw.title,
+            name = decodeHtmlEntities(raw.title),
             duration = raw.moreInfo.duration.toIntOrNull(),
             explicitContent = raw.explicitContent == "1",
             artists = SaavnArtists(
@@ -285,7 +313,7 @@ object SaavnService {
             downloadUrl = createDownloadLinks(raw.moreInfo.encryptedMediaUrl),
             album = SaavnAlbum(
                 id = raw.moreInfo.album_id,
-                name = raw.moreInfo.album
+                name = decodeHtmlEntities(raw.moreInfo.album)
             ),
             isProOnly = raw.moreInfo.rights.isProOnly
         )
@@ -304,7 +332,7 @@ object SaavnService {
             parameter("ctx", "android")  // android ctx: better 320kbps access than wap6dot0
             parameter("q", query)
             parameter("p", "1")
-            parameter("n", "10")  // larger pool → better candidate matching
+            parameter("n", "15")  // larger pool → better candidate matching
         }
 
         Log.d(TAG, "searchSongs: HTTP response status: ${response.status}")

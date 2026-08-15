@@ -132,6 +132,154 @@ object YTPlayerUtils {
      * Metadata (audioConfig, playbackTracking) come from [METADATA_CLIENT] (WEB_REMIX)
      * when the user is logged in, to ensure remote history recording works correctly.
      */
+    private fun sanitizeTitle(title: String): String {
+        if (title.isBlank()) return ""
+        return title
+            .replace(Regex("(?i)\\[(official\\s*(music\\s*)?video|video|audio|lyrics?|hd|4k|visualizer|remastered|explicit)\\]"), "")
+            .replace(Regex("(?i)\\((official\\s*(music\\s*)?video|video|audio|lyrics?|hd|4k|visualizer|remastered|explicit)\\)"), "")
+            .replace(Regex("(?i)\\[feat\\..*?\\]"), "")
+            .replace(Regex("(?i)\\(feat\\..*?\\)"), "")
+            .replace(Regex("(?i)\\[ft\\..*?\\]"), "")
+            .replace(Regex("(?i)\\(ft\\..*?\\)"), "")
+            .replace(Regex("(?i)\\b(feat|ft)\\.?\\s+.*$"), "")
+            .replace(Regex("(?i)-\\s*single$"), "")
+            .replace(Regex("(?i)-\\s*ep$"), "")
+            .replace(Regex("(?i)-\\s*topic$"), "")
+            .replace(Regex("\\s+"), " ")
+            .trim()
+    }
+
+    private fun normalizeForMatching(text: String): String {
+        return text.lowercase(java.util.Locale.US)
+            .replace("’", "'")
+            .replace("‘", "'")
+            .replace("“", "\"")
+            .replace("”", "\"")
+            .replace("–", "-")
+            .replace("—", "-")
+            .replace("&", "and")
+            .replace(Regex("[^a-z0-9\\s]"), "")
+            .replace(Regex("\\s+"), " ")
+            .trim()
+    }
+
+    private fun calculateLevenshteinSimilarity(s1: String, s2: String): Double {
+        if (s1 == s2) return 1.0
+        if (s1.isEmpty() || s2.isEmpty()) return 0.0
+        val d = Array(s1.length + 1) { IntArray(s2.length + 1) }
+        for (i in 0..s1.length) d[i][0] = i
+        for (j in 0..s2.length) d[0][j] = j
+        for (i in 1..s1.length) {
+            for (j in 1..s2.length) {
+                val cost = if (s1[i - 1] == s2[j - 1]) 0 else 1
+                d[i][j] = minOf(
+                    d[i - 1][j] + 1,
+                    d[i][j - 1] + 1,
+                    d[i - 1][j - 1] + cost
+                )
+            }
+        }
+        val maxLen = maxOf(s1.length, s2.length)
+        return 1.0 - (d[s1.length][s2.length].toDouble() / maxLen)
+    }
+
+    private fun calculateTokenJaccard(s1: String, s2: String): Double {
+        val tokens1 = s1.split(" ").filter { it.isNotBlank() }.toSet()
+        val tokens2 = s2.split(" ").filter { it.isNotBlank() }.toSet()
+        if (tokens1.isEmpty() && tokens2.isEmpty()) return 1.0
+        if (tokens1.isEmpty() || tokens2.isEmpty()) return 0.0
+        val intersection = tokens1.intersect(tokens2).size
+        val union = tokens1.union(tokens2).size
+        return intersection.toDouble() / union
+    }
+
+    private fun scoreCandidate(
+        candidate: com.music.jiosaavn.SaavnSong,
+        cleanWantedTitle: String,
+        wantedArtists: List<String>,
+        expectedDuration: Int?,
+        wantedExplicit: Boolean
+    ): Double {
+        // Discard pro-only gated tracks (these return truncated 30s clips)
+        if (candidate.isProOnly) return 0.0
+
+        val cleanCandTitle = sanitizeTitle(candidate.name)
+        val normWantedTitle = normalizeForMatching(cleanWantedTitle)
+        val normCandTitle = normalizeForMatching(cleanCandTitle)
+
+        // 1. Title score (Levenshtein + Token Jaccard)
+        val levSim = calculateLevenshteinSimilarity(normWantedTitle, normCandTitle)
+        val jaccardSim = calculateTokenJaccard(normWantedTitle, normCandTitle)
+        val titleScore = maxOf(levSim, (levSim * 0.5) + (jaccardSim * 0.5))
+
+        if (titleScore < 0.70) return 0.0
+
+        // 2. Artist score (match against primary + featured + all)
+        val candAllArtists = (candidate.artists.primary + candidate.artists.featured + candidate.artists.all)
+            .map { normalizeForMatching(it.name) }
+            .filter { it.isNotBlank() }
+            .toSet()
+
+        val normWantedArtists = wantedArtists.map { normalizeForMatching(it) }.filter { it.isNotBlank() }
+
+        var artistScore = 0.0
+        if (normWantedArtists.isEmpty()) {
+            artistScore = 0.7
+        } else {
+            var matchCount = 0
+            for (wArtist in normWantedArtists) {
+                val matched = candAllArtists.any { cArtist ->
+                    cArtist == wArtist || cArtist.contains(wArtist) || wArtist.contains(cArtist) ||
+                    calculateLevenshteinSimilarity(cArtist, wArtist) >= 0.85
+                }
+                if (matched) matchCount++
+            }
+            artistScore = if (matchCount > 0) (matchCount.toDouble() / normWantedArtists.size).coerceIn(0.65, 1.0) else 0.0
+        }
+
+        if (artistScore == 0.0) return 0.0
+
+        // 3. Duration Score
+        var durationScore = 1.0
+        val candDuration = candidate.duration
+        if (expectedDuration != null && candDuration != null && candDuration > 0) {
+            val diff = Math.abs(expectedDuration - candDuration)
+            durationScore = when {
+                diff <= 2 -> 1.0
+                diff <= 5 -> 0.90
+                diff <= 8 -> 0.75
+                diff <= 12 -> 0.50
+                else -> 0.0
+            }
+        }
+        if (durationScore == 0.0) return 0.0
+
+        // 4. Version preservation / suspicious keyword penalty (prevents karaoke/cover/tribute match)
+        var versionPenalty = 0.0
+        val candLower = candidate.name.lowercase(java.util.Locale.US)
+        val origLower = cleanWantedTitle.lowercase(java.util.Locale.US)
+        val suspiciousWords = listOf("karaoke", "tribute", "cover", "instrumental", "acoustic", "live", "remix", "mashup", "reverb", "slowed", "flip")
+        for (word in suspiciousWords) {
+            val candHas = candLower.contains(word)
+            val origHas = origLower.contains(word)
+            if (candHas && !origHas) {
+                versionPenalty += 0.45
+            }
+        }
+
+        // 5. Explicit flag bonus
+        val explicitBonus = if (candidate.explicitContent == wantedExplicit) 0.05 else 0.0
+
+        val totalScore = (titleScore * 0.40) + (artistScore * 0.35) + (durationScore * 0.25) + explicitBonus - versionPenalty
+        return totalScore.coerceIn(0.0, 1.0)
+    }
+
+    /**
+     * Custom player response intended to use for playback.
+     * When JioSaavn is enabled: evaluates JioSaavn 320k vs. YouTube highest quality and picks
+     * the maximum fidelity stream.
+     * When JioSaavn is disabled: strictly follows the user's configured [audioQuality] setting via YouTube Music.
+     */
     suspend fun playerResponseForPlayback(
         videoId: String,
         playlistId: String? = null,
@@ -140,19 +288,18 @@ object YTPlayerUtils {
         context: android.content.Context? = null,
     ): Result<PlaybackData> {
         // ── JioSaavn intercept ───────────────────────────────────────────────
-        // If the user has enabled JioSaavn streaming, try to resolve the stream
-        // URL from JioSaavn first. We fall through to YouTube on ANY failure so
-        // the user always hears audio.
         if (context != null) {
             val saavnEnabled = context.dataStore.get(EnableSaavnStreamingKey, false)
             if (saavnEnabled) {
-                Timber.tag(TAG).d("JioSaavn streaming enabled — trying Saavn for videoId=$videoId")
+                Timber.tag(TAG).d("JioSaavn streaming enabled — searching JioSaavn 320k for videoId=$videoId")
                 val saavnResult = runCatching {
                     // Step 1: fetch YouTube Music next items and player metadata concurrently
                     val (currentSong, meta) = coroutineScope {
                         val nextDeferred = async {
                             val nextResult = YouTube.next(WatchEndpoint(videoId = videoId)).getOrNull()
-                            nextResult?.items?.getOrNull(nextResult.currentIndex ?: 0)
+                            // Strictly verify target videoId in queue items before falling back to index
+                            nextResult?.items?.firstOrNull { it.id == videoId }
+                                ?: nextResult?.items?.getOrNull(nextResult.currentIndex ?: 0)
                                 ?: nextResult?.items?.firstOrNull()
                         }
                         val metaDeferred = async {
@@ -161,163 +308,100 @@ object YTPlayerUtils {
                         nextDeferred.await() to metaDeferred.await()
                     }
 
-                    // Prefer the YouTube Music next() title; fall back to videoDetails title
-                    val title = currentSong?.title
-                        ?: meta?.videoDetails?.title.orEmpty()
+                    // Prefer clean metadata
+                    val rawTitle = currentSong?.title ?: meta?.videoDetails?.title.orEmpty()
+                    val cleanTitle = sanitizeTitle(rawTitle)
+                    if (cleanTitle.isBlank()) return@runCatching null
 
-                    // Use the proper artist list from SongItem (real artist names).
-                    // Fall back to videoDetails.author with "- Topic" stripped.
                     val artistNames: List<String> = if (currentSong?.artists?.isNotEmpty() == true) {
-                        currentSong.artists.map { it.name }
+                        currentSong.artists.map { sanitizeTitle(it.name) }.filter { it.isNotBlank() }
                     } else {
                         listOf(
-                            meta?.videoDetails?.author.orEmpty().trim()
+                            sanitizeTitle(meta?.videoDetails?.author.orEmpty())
                         ).filter { it.isNotBlank() }
                     }
-                    val artist = artistNames.joinToString(", ")
-
-                    if (title.isBlank()) return@runCatching null
-
+                    val firstArtist = artistNames.firstOrNull().orEmpty()
                     val expectedDuration = meta?.videoDetails?.lengthSeconds?.toIntOrNull()
+                    val wantedExplicit = currentSong?.explicit ?: false
 
-                    Timber.tag(TAG).d("Saavn: resolved title=\"$title\" artists=$artistNames duration=$expectedDuration s for videoId=$videoId")
+                    Timber.tag(TAG).d("Saavn: searching for cleanTitle=\"$cleanTitle\" artists=$artistNames duration=$expectedDuration s")
 
-                    val albumName = currentSong?.album?.name.orEmpty()
-                    val wantedTitleLower = title.lowercase(java.util.Locale.US)
-                    val wantedArtistsLower = artistNames.map { it.lowercase(java.util.Locale.US) }
+                    // Clean targeted search queries (no album noise)
+                    val primaryQuery = if (firstArtist.isNotBlank()) "$cleanTitle $firstArtist" else cleanTitle
+                    val fallbackQuery = cleanTitle
 
-                    val primaryQuery = if (albumName.isNotBlank()) {
-                        "$albumName $title $artist"
-                    } else {
-                        "$title $artist"
-                    }
-                    .replace(Regex("\\s+"), " ")
-                    .trim()
+                    suspend fun findBestCandidate(query: String): com.music.jiosaavn.SaavnSong? {
+                        if (query.isBlank()) return null
+                        val rawSongs = SaavnService.searchSongs(query).getOrNull() ?: return null
+                        val scoredCandidates = rawSongs.map { candidate ->
+                            candidate to scoreCandidate(
+                                candidate = candidate,
+                                cleanWantedTitle = cleanTitle,
+                                wantedArtists = artistNames,
+                                expectedDuration = expectedDuration,
+                                wantedExplicit = wantedExplicit
+                            )
+                        }.filter { it.second >= 0.85 }
+                        .sortedByDescending { it.second }
 
-                    val fallbackQuery = "$title $artist"
-                    .replace(Regex("\\s+"), " ")
-                    .trim()
-
-                    suspend fun findMatch(searchQuery: String): com.music.jiosaavn.SaavnSong? {
-                        if (searchQuery.isBlank()) return null
-                        Timber.tag(TAG).d("Saavn: searching with query: \"$searchQuery\"")
-                        val rawSongs = SaavnService.searchSongs(searchQuery).getOrNull() ?: return null
-                        val wantedExplicit = currentSong?.explicit ?: false
-                        val wantedAlbumLower = albumName.lowercase(java.util.Locale.US)
-                        val songs = rawSongs.sortedWith(
-                            compareByDescending<com.music.jiosaavn.SaavnSong> { candidate ->
-                                val candidateAlbumName = candidate.album?.name
-                                if (wantedAlbumLower.isNotBlank() && candidateAlbumName != null) {
-                                    candidateAlbumName.lowercase(java.util.Locale.US) == wantedAlbumLower
-                                } else {
-                                    false
-                                }
-                            }.thenByDescending { candidate ->
-                                candidate.explicitContent == wantedExplicit
-                            }
-                        )
-                        return songs.firstOrNull { candidate ->
-                            val candidateTitleLower = candidate.name.lowercase(java.util.Locale.US)
-                            val candidateArtists = candidate.artists.primary.map { it.name.lowercase(java.util.Locale.US) }
-                            
-                            // Strict exact matching checks
-                            val titleMatches = candidateTitleLower == wantedTitleLower
-                            
-                            val artistMatches = candidateArtists.sorted() == wantedArtistsLower.sorted()
-                            
-                            val candidateAlbumName = candidate.album?.name
-                            val albumMatches = if (wantedAlbumLower.isNotBlank()) {
-                                candidateAlbumName?.lowercase(java.util.Locale.US) == wantedAlbumLower
-                            } else {
-                                true
-                            }
-
-                            val candDuration = candidate.duration
-                            val durationMatches = if (expectedDuration != null && candDuration != null) {
-                                java.lang.Math.abs(expectedDuration - candDuration) <= 12
-                            } else {
-                                true
-                            }
-
-                            if (titleMatches && artistMatches && !durationMatches) {
-                                Timber.tag(TAG).d("Saavn: Candidate \"${candidate.name}\" matches title/artist but duration differs too much (YT: $expectedDuration s, Saavn: ${candidate.duration} s)")
-                            }
-
-                            titleMatches && artistMatches && albumMatches && durationMatches
+                        val topMatch = scoredCandidates.firstOrNull()
+                        if (topMatch != null) {
+                            Timber.tag(TAG).d("Saavn: Candidate \"${topMatch.first.name}\" matched with score=${topMatch.second}")
                         }
+                        return topMatch?.first
                     }
 
-                    var bestSong = findMatch(primaryQuery)
+                    var bestSong = findBestCandidate(primaryQuery)
                     if (bestSong == null && primaryQuery != fallbackQuery) {
-                        Timber.tag(TAG).d("Saavn: no match found with primary query, trying fallback: \"$fallbackQuery\"")
-                        bestSong = findMatch(fallbackQuery)
+                        Timber.tag(TAG).d("Saavn: no match with primary query, trying fallback: \"$fallbackQuery\"")
+                        bestSong = findBestCandidate(fallbackQuery)
                     }
 
                     if (bestSong == null) {
-                        Timber.tag(TAG).d("Saavn: no matching candidate found — falling back to YT")
+                        Timber.tag(TAG).d("Saavn: no high-confidence candidate found (score < 0.85) — selecting YouTube highest stream")
                         return@runCatching null
                     }
 
-                    Timber.tag(TAG).i("Saavn: matched \"${bestSong.name}\" (id=${bestSong.id}, album=\"${bestSong.album?.name}\")")
-
-                    // Step 4: resolve stream URL at requested quality
-                    val qualityKey = context.dataStore.get(SaavnAudioQualityKey, SaavnAudioQuality.QUALITY_320.name)
-                    val quality = runCatching { SaavnAudioQuality.valueOf(qualityKey) }
-                        .getOrDefault(SaavnAudioQuality.QUALITY_320)
-
-                    // First try to resolve stream URL directly from the search result's downloadUrl list
-                    // to avoid an extra details API call (saves 300ms-800ms).
-                    var streamUrl = SaavnService.selectBestUrl(bestSong.downloadUrl, quality.toApiValue())
+                    // Resolve 320 kbps stream URL directly from search results or details
+                    var streamUrl = SaavnService.selectBestUrl(bestSong.downloadUrl, "320kbps")
                     if (streamUrl.isNullOrBlank()) {
-                        Timber.tag(TAG).d("Saavn: downloadUrl list empty in search results, fetching via getBestStreamUrl for songId=${bestSong.id}")
-                        streamUrl = SaavnService.getBestStreamUrl(bestSong.id, quality.toApiValue())
-                    } else {
-                        Timber.tag(TAG).d("Saavn: resolved stream URL directly from search results: $streamUrl")
+                        streamUrl = SaavnService.getBestStreamUrl(bestSong.id, "320kbps")
                     }
 
                     if (streamUrl.isNullOrBlank()) {
-                        Timber.tag(TAG).d("Saavn: no stream URL for songId=${bestSong.id} — falling back to YT")
+                        Timber.tag(TAG).d("Saavn: no 320 kbps stream URL for songId=${bestSong.id} — selecting YouTube highest stream")
                         return@runCatching null
                     }
 
-                    // Resolve the actual content length using a lightweight Range query
+                    // Verify stream length using lightweight Range probe (must be > 1MB for valid 320k stream)
                     val contentLength = SaavnService.getContentLength(streamUrl)
+                    if (contentLength != null && contentLength < 1_000_000) {
+                        Timber.tag(TAG).w("Saavn: Stream length too small ($contentLength bytes, likely preview clip) — selecting YouTube highest stream")
+                        return@runCatching null
+                    }
 
-                    Timber.tag(TAG).i("Saavn: streaming from JioSaavn (quality=${quality.toApiValue()}) resolved contentLength=$contentLength for videoId=$videoId")
-                    // Return a minimal PlaybackData using the Saavn URL.
-                    // Reuse the YouTube metadata already fetched in Step 1 — no second
-                    // network call needed. This keeps audioConfig/videoDetails/playbackTracking
-                    // intact so history and normalization still work properly.
+                    Timber.tag(TAG).i("Saavn: streaming 320 kbps master audio (contentLength=$contentLength) for videoId=$videoId")
+
                     PlaybackData(
                         audioConfig      = meta?.playerConfig?.audioConfig,
                         videoDetails     = meta?.videoDetails,
                         playbackTracking = meta?.playbackTracking,
                         format           = PlayerResponse.StreamingData.Format(
-                            itag             = when (quality) {
-                                SaavnAudioQuality.QUALITY_320 -> 141
-                                SaavnAudioQuality.QUALITY_160 -> 140
-                                SaavnAudioQuality.QUALITY_96  -> 139
-                            },
+                            itag             = 141,
                             url              = streamUrl,
-                            // JioSaavn delivers AAC-LC audio inside a regular MP4 container
-                            // (e.g. https://aac.saavncdn.com/.../{id}_320.mp4)
                             mimeType         = "audio/mp4; codecs=\"mp4a.40.2\"",
-                            bitrate          = when (quality) {
-                                SaavnAudioQuality.QUALITY_320 -> 320_000
-                                SaavnAudioQuality.QUALITY_160 -> 160_000
-                                SaavnAudioQuality.QUALITY_96  -> 96_000
-                            },
+                            bitrate          = 320_000,
                             width            = null,
                             height           = null,
                             contentLength    = contentLength,
-                            quality          = quality.toApiValue(),
+                            quality          = "320kbps",
                             fps              = null,
                             qualityLabel     = null,
                             averageBitrate   = null,
-                            audioQuality     = quality.toApiValue(),
+                            audioQuality     = "320kbps",
                             approxDurationMs = null,
-                            audioSampleRate  = null,
-                            audioChannels    = null,
+                            audioSampleRate  = 44100,
+                            audioChannels    = 2,
                             loudnessDb       = null,
                             lastModified     = null,
                             signatureCipher  = null,
@@ -326,15 +410,17 @@ object YTPlayerUtils {
                         ),
                         streamUrl              = streamUrl,
                         streamExpiresInSeconds = 3600,
-                        isSaavnStream          = true,   // ← mark as Saavn so downloads skip YT range trick
+                        isSaavnStream          = true,
                     )
                 }.getOrNull()
 
                 if (saavnResult != null) {
                     return Result.success(saavnResult)
                 }
-                // Any exception or null → fall through to YouTube below
-                Timber.tag(TAG).d("Saavn intercept failed or returned null — falling back to YouTube")
+
+                // If JioSaavn didn't yield a valid 320k stream, select YouTube Music's highest quality format
+                Timber.tag(TAG).d("JioSaavn 320k unavailable — falling back to YouTube Music HIGH quality")
+                return resolvePlaybackData(videoId, playlistId, AudioQuality.HIGH, connectivityManager)
             }
         }
         // ── End JioSaavn intercept ───────────────────────────────────────────
