@@ -291,7 +291,7 @@ object YTPlayerUtils {
     ): Result<PlaybackData> {
         val saavnEnabled = context?.dataStore?.get(EnableSaavnStreamingKey, false) ?: false
 
-        // Fast path: When JioSaavn is OFF, execute strictly via standard YouTube player pipeline
+        // Standard YouTube Mode: When JioSaavn is OFF, execute strictly via standard YouTube player pipeline
         if (!saavnEnabled) {
             val firstAttempt = resolvePlaybackData(videoId, playlistId, audioQuality, connectivityManager)
             if (firstAttempt.isFailure && YouTube.cookie == null) {
@@ -307,25 +307,27 @@ object YTPlayerUtils {
         }
 
         // JioSaavn Maximum Fidelity Mode:
-        // Launch YouTube high-quality resolution in parallel so playback is NEVER delayed.
+        // Resolve YouTube high-quality stream concurrently while searching JioSaavn for 320k match
         return coroutineScope {
             val ytDeferred = async(Dispatchers.IO) {
                 resolvePlaybackData(videoId, playlistId, AudioQuality.HIGH, connectivityManager)
             }
 
-            val saavnPlayback = withTimeoutOrNull(1500L) {
-                runCatching {
-                    val ytResult = ytDeferred.await().getOrNull() ?: return@runCatching null
-                    val cleanTitle = sanitizeTitle(ytResult.videoDetails?.title.orEmpty())
-                    if (cleanTitle.isBlank()) return@runCatching null
+            val saavnPlayback = runCatching {
+                val ytResult = ytDeferred.await().getOrNull() ?: return@runCatching null
+                val cleanTitle = sanitizeTitle(ytResult.videoDetails?.title.orEmpty())
+                if (cleanTitle.isBlank()) return@runCatching null
 
-                    val author = sanitizeTitle(ytResult.videoDetails?.author.orEmpty())
-                    val artistNames = if (author.isNotBlank()) listOf(author) else emptyList()
-                    val expectedDuration = ytResult.videoDetails?.lengthSeconds?.toIntOrNull()
+                val author = sanitizeTitle(ytResult.videoDetails?.author.orEmpty())
+                val artistNames = if (author.isNotBlank()) listOf(author) else emptyList()
+                val expectedDuration = ytResult.videoDetails?.lengthSeconds?.toIntOrNull()
 
-                    val query = if (author.isNotBlank()) "$cleanTitle $author" else cleanTitle
-                    val rawSongs = SaavnService.searchSongs(query).getOrNull() ?: return@runCatching null
+                val primaryQuery = if (author.isNotBlank()) "$cleanTitle $author" else cleanTitle
+                val fallbackQuery = cleanTitle
 
+                suspend fun findCandidate(query: String): com.music.jiosaavn.SaavnSong? {
+                    if (query.isBlank()) return null
+                    val rawSongs = SaavnService.searchSongs(query).getOrNull() ?: return null
                     val scoredCandidates = rawSongs.map { candidate ->
                         candidate to scoreCandidate(
                             candidate = candidate,
@@ -336,54 +338,60 @@ object YTPlayerUtils {
                         )
                     }.filter { it.second >= 0.85 }
                     .sortedByDescending { it.second }
+                    return scoredCandidates.firstOrNull()?.first
+                }
 
-                    val bestSong = scoredCandidates.firstOrNull()?.first ?: return@runCatching null
+                var bestSong = findCandidate(primaryQuery)
+                if (bestSong == null && primaryQuery != fallbackQuery) {
+                    bestSong = findCandidate(fallbackQuery)
+                }
 
-                    var streamUrl = SaavnService.selectBestUrl(bestSong.downloadUrl, "320kbps")
-                    if (streamUrl.isNullOrBlank()) {
-                        streamUrl = SaavnService.getBestStreamUrl(bestSong.id, "320kbps")
-                    }
-                    if (streamUrl.isNullOrBlank()) return@runCatching null
+                if (bestSong == null) return@runCatching null
 
-                    Timber.tag(TAG).i("Saavn: verified 320 kbps match \"${bestSong.name}\" for videoId=$videoId")
+                var streamUrl = SaavnService.selectBestUrl(bestSong.downloadUrl, "320kbps")
+                if (streamUrl.isNullOrBlank()) {
+                    streamUrl = SaavnService.getBestStreamUrl(bestSong.id, "320kbps")
+                }
+                if (streamUrl.isNullOrBlank()) return@runCatching null
 
-                    PlaybackData(
-                        audioConfig = ytResult.audioConfig,
-                        videoDetails = ytResult.videoDetails,
-                        playbackTracking = ytResult.playbackTracking,
-                        format = PlayerResponse.StreamingData.Format(
-                            itag = 141,
-                            url = streamUrl,
-                            mimeType = "audio/mp4; codecs=\"mp4a.40.2\"",
-                            bitrate = 320_000,
-                            width = null,
-                            height = null,
-                            contentLength = null,
-                            quality = "320kbps",
-                            fps = null,
-                            qualityLabel = null,
-                            averageBitrate = null,
-                            audioQuality = "320kbps",
-                            approxDurationMs = null,
-                            audioSampleRate = 44100,
-                            audioChannels = 2,
-                            loudnessDb = null,
-                            lastModified = null,
-                            signatureCipher = null,
-                            cipher = null,
-                            audioTrack = null,
-                        ),
-                        streamUrl = streamUrl,
-                        streamExpiresInSeconds = 3600,
-                        isSaavnStream = true,
-                    )
-                }.getOrNull()
-            }
+                Timber.tag(TAG).i("Saavn: verified 320 kbps match \"${bestSong.name}\" for videoId=$videoId")
+
+                PlaybackData(
+                    audioConfig = ytResult.audioConfig,
+                    videoDetails = ytResult.videoDetails,
+                    playbackTracking = ytResult.playbackTracking,
+                    format = PlayerResponse.StreamingData.Format(
+                        itag = 141,
+                        url = streamUrl,
+                        mimeType = "audio/mp4; codecs=\"mp4a.40.2\"",
+                        bitrate = 320_000,
+                        width = null,
+                        height = null,
+                        contentLength = null,
+                        quality = "320kbps",
+                        fps = null,
+                        qualityLabel = null,
+                        averageBitrate = null,
+                        audioQuality = "320kbps",
+                        approxDurationMs = null,
+                        audioSampleRate = 44100,
+                        audioChannels = 2,
+                        loudnessDb = null,
+                        lastModified = null,
+                        signatureCipher = null,
+                        cipher = null,
+                        audioTrack = null,
+                    ),
+                    streamUrl = streamUrl,
+                    streamExpiresInSeconds = 3600,
+                    isSaavnStream = true,
+                )
+            }.getOrNull()
 
             if (saavnPlayback != null) {
                 Result.success(saavnPlayback)
             } else {
-                Timber.tag(TAG).d("JioSaavn 320k not matched/timed out — returning YouTube HIGH quality stream")
+                Timber.tag(TAG).d("JioSaavn 320k not matched — returning YouTube HIGH quality stream")
                 ytDeferred.await()
             }
         }
