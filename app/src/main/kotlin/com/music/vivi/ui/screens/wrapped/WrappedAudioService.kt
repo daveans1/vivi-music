@@ -112,6 +112,7 @@ class WrappedAudioService(
                     videoId = songId,
                     audioQuality = audioQuality,
                     connectivityManager = connectivityManager,
+                    context = context,
                 ).getOrNull()
             }
             val streamUrl = playbackData?.streamUrl
