@@ -1,4 +1,4 @@
-name: CI & Debug Build
+name: CI & Build APKs
 
 on:
   workflow_dispatch:
@@ -13,8 +13,8 @@ on:
     branches: [ '**' ]
 
 jobs:
-  build_debug:
-    name: Build Universal GMS Debug
+  build_apks:
+    name: Build Universal APKs
     runs-on: ubuntu-latest
     if: github.actor != 'dependabot[bot]'
     steps:
@@ -47,12 +47,18 @@ jobs:
             -validity 10000 \
             -dname "CN=Android Debug,O=Android,C=US"
 
-      - name: Build Debug APK
+      - name: Build Release and Debug APKs
         env:
           LASTFM_API_KEY: ${{ secrets.LASTFM_API_KEY }}
           LASTFM_SECRET: ${{ secrets.LASTFM_SECRET }}
         run: |
-          ./gradlew assembleUniversalGmsDebug --no-configuration-cache --console=plain --warning-mode summary
+          ./gradlew assembleUniversalGmsRelease assembleUniversalGmsDebug --no-configuration-cache --console=plain --warning-mode summary
+
+      - name: Upload Release APK (Optimized, Zero Lag)
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-universal-gms-release
+          path: app/build/outputs/apk/universalGms/release/*.apk
 
       - name: Upload Debug APK
         uses: actions/upload-artifact@v4

@@ -431,30 +431,18 @@ object SaavnService {
      */
     suspend fun getContentLength(url: String): Long? = runCatching {
         Log.d(TAG, "getContentLength: url=$url")
-        val getClient = HttpClient(CIO) {
-            install(HttpTimeout) {
-                requestTimeoutMillis = 4_000
-                connectTimeoutMillis = 2_000
-                socketTimeoutMillis  = 4_000
-            }
-            expectSuccess = false
-            followRedirects = true
+        val response = client.get(url) {
+            headers.append(HttpHeaders.Range, "bytes=0-0")
         }
-        getClient.use { c ->
-            val response = c.get(url) {
-                headers.append(HttpHeaders.Range, "bytes=0-0")
-                headers.append(HttpHeaders.UserAgent, "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36")
-            }
-            Log.d(TAG, "getContentLength: HTTP status=${response.status}")
-            if (response.status == HttpStatusCode.PartialContent || response.status == HttpStatusCode.OK) {
-                val contentRange = response.headers[HttpHeaders.ContentRange]
-                val len = contentRange?.substringAfter('/')?.toLongOrNull()
-                    ?: response.headers[HttpHeaders.ContentLength]?.toLongOrNull()
-                Log.d(TAG, "getContentLength: resolved length=$len from contentRange=$contentRange")
-                len
-            } else {
-                null
-            }
+        Log.d(TAG, "getContentLength: HTTP status=${response.status}")
+        if (response.status == HttpStatusCode.PartialContent || response.status == HttpStatusCode.OK) {
+            val contentRange = response.headers[HttpHeaders.ContentRange]
+            val len = contentRange?.substringAfter('/')?.toLongOrNull()
+                ?: response.headers[HttpHeaders.ContentLength]?.toLongOrNull()
+            Log.d(TAG, "getContentLength: resolved length=$len from contentRange=$contentRange")
+            len
+        } else {
+            null
         }
     }.onFailure {
         Log.e(TAG, "getContentLength failed for url=$url", it)
