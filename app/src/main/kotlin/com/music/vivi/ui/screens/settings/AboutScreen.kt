@@ -242,7 +242,7 @@ fun AboutScreen(
                     description = { Text(stringResource(R.string.app_developer), color = MaterialTheme.colorScheme.primary) },
                     tintIcon = false,
                     iconShape = cookieShape,
-                    onClick = { uriHandler.safeOpenUri(context, "https://github.com/vivizzz007") },
+                    onClick = { uriHandler.safeOpenUri(context, "https://github.com/${com.music.vivi.constants.GithubConfig.REPO_OWNER}") },
                     isExpressive = true,
                     descriptionBelow = true,
                     isExternalLink = true
@@ -281,7 +281,7 @@ fun AboutScreen(
                 Material3SettingsItem(
                     icon = painterResource(R.drawable.github),
                     title = { Text(stringResource(R.string.github_repository)) },
-                    onClick = { uriHandler.safeOpenUri(context, "https://github.com/vivizzz007/vivi-music") },
+                    onClick = { uriHandler.safeOpenUri(context, com.music.vivi.constants.GithubConfig.REPO_URL) },
                     isExpressive = true,
                     isExternalLink = true
                 ),
@@ -316,7 +316,7 @@ fun AboutScreen(
                 Material3SettingsItem(
                     icon = painterResource(R.drawable.license_vivi),
                     title = { Text(stringResource(R.string.license)) },
-                    onClick = { uriHandler.safeOpenUri(context, "https://github.com/vivizzz007/vivi-music/blob/main/LICENSE") },
+                    onClick = { uriHandler.safeOpenUri(context, "${com.music.vivi.constants.GithubConfig.REPO_URL}/blob/main/LICENSE") },
                     isExpressive = true,
                     isExternalLink = true
                 ),

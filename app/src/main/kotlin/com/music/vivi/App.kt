@@ -73,7 +73,9 @@ class App : Application(), SingletonImageLoader.Factory {
         // Initialize cacheDir for YouTubeExtractor JS decipher caching
         com.music.innertube.YouTubeExtractor.cacheDir = cacheDir
 
-        Timber.plant(Timber.DebugTree())
+        if (BuildConfig.DEBUG) {
+            Timber.plant(Timber.DebugTree())
+        }
 
         // Pre-warm decipher scripts in the background so first song plays instantly
         applicationScope.launch(Dispatchers.IO) {
@@ -269,9 +271,9 @@ class App : Application(), SingletonImageLoader.Factory {
     }
 
     override fun newImageLoader(context: PlatformContext): ImageLoader {
-        val cacheSize = runBlocking {
-            dataStore.data.map { it[MaxImageCacheSizeKey] ?: 512 }.first()
-        }
+        val cacheSize = if (ViviPrefCache.isInitialized()) {
+            ViviPrefCache.get(MaxImageCacheSizeKey) ?: 512
+        } else 512
         return ImageLoader.Builder(this).apply {
             crossfade(true)
             allowHardware(Build.VERSION.SDK_INT >= Build.VERSION_CODES.P)

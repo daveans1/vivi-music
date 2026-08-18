@@ -97,6 +97,19 @@
     public static boolean isLoggable(java.lang.String, int);
     public static int v(...);
     public static int d(...);
+    public static int i(...);
+}
+
+-assumenosideeffects class timber.log.Timber {
+    public static void v(...);
+    public static void d(...);
+    public static void i(...);
+}
+
+-assumenosideeffects class timber.log.Timber$Forest {
+    public static void v(...);
+    public static void d(...);
+    public static void i(...);
 }
 
 ##──────────────────────────────────────────────────────────────────────────────

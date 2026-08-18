@@ -621,7 +621,7 @@ fun WelcomePagerScreen(onFinished: () -> Unit) {
                                 )
                             },
                             onClick = {
-                                uriHandler.safeOpenUri(context, "https://github.com/vivizzz007/vivi-music")
+                                uriHandler.safeOpenUri(context, com.music.vivi.constants.GithubConfig.REPO_URL)
                             }
                         )
 

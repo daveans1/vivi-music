@@ -7,14 +7,14 @@
   <h3>More Than Just Music — Your Ultimate Audio Experience</h3>
 
   <p>
-    <a href="https://github.com/vivizzz007/vivi-music/releases">
-      <img src="https://img.shields.io/github/v/release/vivizzz007/vivi-music?label=Download&style=for-the-badge&color=4CAF50" alt="Download Latest">
+    <a href="https://github.com/daveans1/vivi-music/releases">
+      <img src="https://img.shields.io/github/v/release/daveans1/vivi-music?label=Download&style=for-the-badge&color=4CAF50" alt="Download Latest">
     </a>
-    <a href="https://github.com/vivizzz007/vivi-music/releases">
-      <img src="https://img.shields.io/github/downloads/vivizzz007/vivi-music/total?style=for-the-badge&color=blue" alt="Downloads">
+    <a href="https://github.com/daveans1/vivi-music/releases">
+      <img src="https://img.shields.io/github/downloads/daveans1/vivi-music/total?style=for-the-badge&color=blue" alt="Downloads">
     </a>
     <a href="LICENSE">
-      <img src="https://img.shields.io/github/license/vivizzz007/vivi-music?style=for-the-badge" alt="License">
+      <img src="https://img.shields.io/github/license/daveans1/vivi-music?style=for-the-badge" alt="License">
     </a>
     <a href="https://ko-fi.com/vividhpashokan">
       <img src="https://img.shields.io/badge/Support-Ko--fi-F16061?style=for-the-badge&logo=ko-fi&logoColor=white" alt="Support on Ko-fi">
@@ -245,9 +245,9 @@
         </a>
         <br><br>
         <sub>
-          <a href="https://github.com/vivizzz007/vivi-music/issues">🐞 Report Bugs</a> &nbsp;•&nbsp;
-          <a href="https://github.com/vivizzz007/vivi-music/discussions">💬 Discussions</a> &nbsp;•&nbsp;
-          <a href="https://github.com/vivizzz007/vivi-music/releases">🚀 Releases</a>
+          <a href="https://github.com/daveans1/vivi-music/issues">🐞 Report Bugs</a> &nbsp;•&nbsp;
+          <a href="https://github.com/daveans1/vivi-music/discussions">💬 Discussions</a> &nbsp;•&nbsp;
+          <a href="https://github.com/daveans1/vivi-music/releases">🚀 Releases</a>
         </sub>
       </td>
     </tr>
