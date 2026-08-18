@@ -137,8 +137,8 @@ object YTPlayerUtils {
     private fun sanitizeTitle(title: String): String {
         if (title.isBlank()) return ""
         return title
-            .replace(Regex("(?i)\\[(official\\s*(music\\s*)?video|video|audio|lyrics?|hd|4k|visualizer|remastered|explicit)\\]"), "")
-            .replace(Regex("(?i)\\((official\\s*(music\\s*)?video|video|audio|lyrics?|hd|4k|visualizer|remastered|explicit)\\)"), "")
+            .replace(Regex("(?i)\\[(official\\s*(music\\s*)?video|video|audio|lyrics?|hd|4k|visualizer|remastered|explicit|hq)\\]"), "")
+            .replace(Regex("(?i)\\((official\\s*(music\\s*)?video|video|audio|lyrics?|hd|4k|visualizer|remastered|explicit|hq)\\)"), "")
             .replace(Regex("(?i)\\[feat\\..*?\\]"), "")
             .replace(Regex("(?i)\\(feat\\..*?\\)"), "")
             .replace(Regex("(?i)\\[ft\\..*?\\]"), "")
@@ -195,6 +195,39 @@ object YTPlayerUtils {
         return intersection.toDouble() / union
     }
 
+    private fun calculateTitleScore(cleanWanted: String, cleanCandidate: String): Double {
+        val normWanted = normalizeForMatching(cleanWanted)
+        val normCand = normalizeForMatching(cleanCandidate)
+        if (normWanted == normCand) return 1.0
+        if (normWanted.isEmpty() || normCand.isEmpty()) return 0.0
+
+        val levSim = calculateLevenshteinSimilarity(normWanted, normCand)
+        val jaccardSim = calculateTokenJaccard(normWanted, normCand)
+        var bestScore = maxOf(levSim, (levSim * 0.5) + (jaccardSim * 0.5))
+
+        // Check if candidate title is embedded inside "Artist - Title" format
+        if (cleanWanted.contains(" - ") || cleanWanted.contains("-")) {
+            val parts = cleanWanted.split("-").map { normalizeForMatching(it) }.filter { it.isNotBlank() }
+            for (part in parts) {
+                val partLev = calculateLevenshteinSimilarity(part, normCand)
+                val partJac = calculateTokenJaccard(part, normCand)
+                val partScore = maxOf(partLev, (partLev * 0.5) + (partJac * 0.5))
+                if (partScore > bestScore) bestScore = partScore
+            }
+        }
+
+        // Substring check (e.g. "blinding lights" inside "the weeknd blinding lights")
+        if (normWanted.contains(normCand) || normCand.contains(normWanted)) {
+            val minLen = minOf(normWanted.length, normCand.length)
+            val maxLen = maxOf(normWanted.length, normCand.length)
+            if (minLen.toDouble() / maxLen >= 0.35) {
+                bestScore = maxOf(bestScore, 0.90)
+            }
+        }
+
+        return bestScore
+    }
+
     private fun scoreCandidate(
         candidate: com.music.jiosaavn.SaavnSong,
         cleanWantedTitle: String,
@@ -206,40 +239,41 @@ object YTPlayerUtils {
         if (candidate.isProOnly) return 0.0
 
         val cleanCandTitle = sanitizeTitle(candidate.name)
-        val normWantedTitle = normalizeForMatching(cleanWantedTitle)
-        val normCandTitle = normalizeForMatching(cleanCandTitle)
-
-        // 1. Title score (Levenshtein + Token Jaccard)
-        val levSim = calculateLevenshteinSimilarity(normWantedTitle, normCandTitle)
-        val jaccardSim = calculateTokenJaccard(normWantedTitle, normCandTitle)
-        val titleScore = maxOf(levSim, (levSim * 0.5) + (jaccardSim * 0.5))
-
-        if (titleScore < 0.70) return 0.0
+        val titleScore = calculateTitleScore(cleanWantedTitle, cleanCandTitle)
+        if (titleScore < 0.60) return 0.0
 
         // 2. Artist score (match against primary + featured + all)
         val candAllArtists = (candidate.artists.primary + candidate.artists.featured + candidate.artists.all)
-            .map { normalizeForMatching(it.name) }
+            .flatMap { it.name.split(",", "&", "feat", "ft", "with", "and", "/", "x") }
+            .map { normalizeForMatching(it) }
             .filter { it.isNotBlank() }
             .toSet()
 
-        val normWantedArtists = wantedArtists.map { normalizeForMatching(it) }.filter { it.isNotBlank() }
+        val splitWantedArtists = wantedArtists
+            .flatMap { it.split(",", "&", "feat", "ft", "with", "and", "/", "x") }
+            .map { normalizeForMatching(it) }
+            .filter { it.isNotBlank() }
 
         var artistScore = 0.0
-        if (normWantedArtists.isEmpty()) {
-            artistScore = 0.7
+        if (splitWantedArtists.isEmpty()) {
+            artistScore = 0.80
         } else {
             var matchCount = 0
-            for (wArtist in normWantedArtists) {
+            for (wArtist in splitWantedArtists) {
                 val matched = candAllArtists.any { cArtist ->
                     cArtist == wArtist || cArtist.contains(wArtist) || wArtist.contains(cArtist) ||
-                    calculateLevenshteinSimilarity(cArtist, wArtist) >= 0.85
+                    calculateLevenshteinSimilarity(cArtist, wArtist) >= 0.75
                 }
                 if (matched) matchCount++
             }
-            artistScore = if (matchCount > 0) (matchCount.toDouble() / normWantedArtists.size).coerceIn(0.65, 1.0) else 0.0
+            artistScore = if (matchCount > 0) 1.0 else 0.0
         }
 
-        if (artistScore == 0.0) return 0.0
+        // If artist did not match at all, only proceed if title score is near-perfect (>= 0.95)
+        if (artistScore == 0.0) {
+            if (titleScore < 0.95) return 0.0
+            artistScore = 0.50
+        }
 
         // 3. Duration Score
         var durationScore = 1.0
@@ -247,10 +281,11 @@ object YTPlayerUtils {
         if (expectedDuration != null && candDuration != null && candDuration > 0) {
             val diff = Math.abs(expectedDuration - candDuration)
             durationScore = when {
-                diff <= 2 -> 1.0
-                diff <= 5 -> 0.90
-                diff <= 8 -> 0.75
-                diff <= 12 -> 0.50
+                diff <= 3 -> 1.0
+                diff <= 8 -> 0.95
+                diff <= 16 -> 0.85
+                diff <= 28 -> 0.70
+                diff <= 45 -> 0.40
                 else -> 0.0
             }
         }
@@ -265,14 +300,14 @@ object YTPlayerUtils {
             val candHas = candLower.contains(word)
             val origHas = origLower.contains(word)
             if (candHas && !origHas) {
-                versionPenalty += 0.45
+                versionPenalty += 0.40
             }
         }
 
         // 5. Explicit flag bonus
         val explicitBonus = if (candidate.explicitContent == wantedExplicit) 0.05 else 0.0
 
-        val totalScore = (titleScore * 0.40) + (artistScore * 0.35) + (durationScore * 0.25) + explicitBonus - versionPenalty
+        val totalScore = (titleScore * 0.45) + (artistScore * 0.35) + (durationScore * 0.20) + explicitBonus - versionPenalty
         return totalScore.coerceIn(0.0, 1.0)
     }
 
@@ -322,8 +357,11 @@ object YTPlayerUtils {
                 val artistNames = if (author.isNotBlank()) listOf(author) else emptyList()
                 val expectedDuration = ytResult.videoDetails?.lengthSeconds?.toIntOrNull()
 
-                val primaryQuery = if (author.isNotBlank()) "$cleanTitle $author" else cleanTitle
-                val fallbackQuery = cleanTitle
+                // Clean search queries
+                // Also check if cleanTitle has "Artist - Song", extract pure song title for targeted search
+                val pureSongTitle = if (cleanTitle.contains(" - ")) cleanTitle.substringAfter(" - ").trim() else cleanTitle
+                val primaryQuery = if (author.isNotBlank()) "$pureSongTitle $author" else cleanTitle
+                val fallbackQuery = if (pureSongTitle != cleanTitle) pureSongTitle else cleanTitle
 
                 suspend fun findCandidate(query: String): com.music.jiosaavn.SaavnSong? {
                     if (query.isBlank()) return null
@@ -336,7 +374,7 @@ object YTPlayerUtils {
                             expectedDuration = expectedDuration,
                             wantedExplicit = false
                         )
-                    }.filter { it.second >= 0.85 }
+                    }.filter { it.second >= 0.72 }
                     .sortedByDescending { it.second }
                     return scoredCandidates.firstOrNull()?.first
                 }

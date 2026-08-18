@@ -251,18 +251,14 @@ object SaavnService {
             Pair("_320", "320kbps")
         )
 
-        val suffixRegex = Regex("""_(?:48|96|160|320)\.(mp4|aac|mp3)$""")
-        val terminal96Regex = Regex("""_96(?=\.[a-zA-Z0-9]+$)""")
+        val bitratePattern = Regex("""_(?:48|96|160|320)(?=\.(?:mp4|aac|mp3))""")
+        val fallback96Pattern = Regex("""_96(?=\.[a-zA-Z0-9]+)""")
 
         val generatedUrls = qualities.map { (suffix, bitrate) ->
-            val url = if (decryptedUrl.contains(suffixRegex)) {
-                decryptedUrl.replace(suffixRegex) { match ->
-                    "${suffix}.${match.groupValues[1]}"
-                }
-            } else if (decryptedUrl.contains(terminal96Regex)) {
-                decryptedUrl.replace(terminal96Regex, suffix)
-            } else {
-                decryptedUrl
+            val url = when {
+                decryptedUrl.contains(bitratePattern) -> decryptedUrl.replace(bitratePattern, suffix)
+                decryptedUrl.contains(fallback96Pattern) -> decryptedUrl.replace(fallback96Pattern, suffix)
+                else -> decryptedUrl
             }
             SaavnDownloadUrl(quality = bitrate, url = url)
         }
