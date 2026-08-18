@@ -1,0 +1,5 @@
+- Added high-fidelity 320 kbps streaming matching engine with intelligent multi-artist and duration tolerance
+- Fixed low bitrate stream fallbacks ensuring high quality audio playback
+- Fixed in-app update routing and changelog viewer to connect to daveans1 fork
+- Optimized UI rendering performance and eliminated background log overhead
+- Updated package identifier for clean independent installations

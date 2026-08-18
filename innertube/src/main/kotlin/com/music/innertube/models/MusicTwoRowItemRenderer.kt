@@ -29,7 +29,10 @@ data class MusicTwoRowItemRenderer(
                 ?.browseEndpointContextSupportedConfigs
                 ?.browseEndpointContextMusicConfig
                 ?.pageType ==
-                MUSIC_PAGE_TYPE_PLAYLIST
+                MUSIC_PAGE_TYPE_PLAYLIST ||
+                navigationEndpoint.browseEndpoint?.browseId?.let {
+                    it.startsWith("VL") || it.startsWith("PL") || it.startsWith("RDCLAK")
+                } == true
     val isAlbum: Boolean
         get() =
             navigationEndpoint.browseEndpoint
@@ -41,14 +44,18 @@ data class MusicTwoRowItemRenderer(
                     ?.browseEndpointContextSupportedConfigs
                     ?.browseEndpointContextMusicConfig
                     ?.pageType ==
-                MUSIC_PAGE_TYPE_AUDIOBOOK
+                MUSIC_PAGE_TYPE_AUDIOBOOK ||
+                navigationEndpoint.browseEndpoint?.browseId?.let {
+                    it.startsWith("MPREb_") || it.contains("release_detail")
+                } == true
     val isArtist: Boolean
         get() =
             navigationEndpoint.browseEndpoint
                 ?.browseEndpointContextSupportedConfigs
                 ?.browseEndpointContextMusicConfig
                 ?.pageType ==
-                MUSIC_PAGE_TYPE_ARTIST
+                MUSIC_PAGE_TYPE_ARTIST ||
+                navigationEndpoint.browseEndpoint?.browseId?.startsWith("UC") == true
 
     val musicVideoType: String?
         get() =
