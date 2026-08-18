@@ -119,8 +119,9 @@ jobs:
         if: steps.check_release.outputs.exists == 'false'
         run: |
           mkdir -p release_assets
-          cp "${{ steps.sign_gms.outputs.signedFile }}" release_assets/vivi.apk
-          cp "${{ steps.sign_foss.outputs.signedFile }}" release_assets/izzydroid-universal-foss-release.apk
+          cp app/build/outputs/apk/universalGms/release/app-universal-gms-release.apk release_assets/vivi.apk
+          cp app/build/outputs/apk/universalGms/release/app-universal-gms-release.apk release_assets/app-universal-gms-release.apk
+          cp app/build/outputs/apk/universalFoss/release/app-universal-foss-release.apk release_assets/izzydroid-universal-foss-release.apk
 
       - name: Generate changelog.json
         if: steps.check_release.outputs.exists == 'false'
@@ -153,29 +154,19 @@ jobs:
               with open(changelog_file, 'r', encoding='utf-8') as f:
                   for line in f:
                       line_str = line.strip()
-                      if not line_str:
-                          continue
-                      if line_str.lower().startswith("description::"):
-                          description = line_str[len("description::"):].strip()
-                      elif line_str.lower().startswith("image::"):
-                          image_url = line_str[len("image::"):].strip()
-                      else:
-                          clean_line = line_str.lstrip("*-• ").strip()
-                          if "fix" in clean_line.lower() or "resolve" in clean_line.lower():
-                              fixes.append(clean_line)
+                      if line_str.startswith("- "):
+                          line_str = line_str[2:].strip()
+                          if line_str.lower().startswith("fixed") or line_str.lower().startswith("fix"):
+                              fixes.append(line_str)
                           else:
-                              features.append(clean_line)
-          else:
-              features.append("Bug fixes and performance improvements.")
-              
+                              features.append(line_str)
+          
           if not description:
               summary_items = []
-              for feat in features[:3]:
-                  val = feat
-                  for prefix in ["added new ", "added a ", "added ", "updated new ", "updated ", "new "]:
-                      if val.lower().startswith(prefix):
-                          val = val[len(prefix):]
-                          break
+              for item in features[:3]:
+                  val = item
+                  if val.lower().startswith("added ") or val.lower().startswith("add "):
+                      val = val.split(" ", 1)[1]
                   if val:
                       val = val[0].lower() + val[1:]
                   summary_items.append(val)
@@ -188,9 +179,9 @@ jobs:
                       desc_text += "."
                   if fixes:
                       desc_text += " It also includes several bug fixes."
-                  description = f"VIVI MUSIC v{version_name} {desc_text}"
+                  description = f"ViVi Fork v{version_name} {desc_text}"
               else:
-                  description = f"VIVI MUSIC v{version_name} brings new updates, features, and bug fixes."
+                  description = f"ViVi Fork v{version_name} brings new updates, features, and bug fixes."
                   
           changelog_sections = []
           if features:
@@ -203,15 +194,6 @@ jobs:
                   "title": "Fixes & Improvements",
                   "items": fixes
               })
-              
-          changelog_sections.append({
-              "title": "Support",
-              "items": [
-                  "Support development on Ko-fi: https://ko-fi.com/vividhpashokan",
-                  "Support via UPI: vividhpashokan@axl",
-                  "Support via PayPal: https://www.paypal.me/vividhpashokan"
-              ]
-          })
               
           data = {
               "version": version_name,
@@ -235,11 +217,10 @@ jobs:
           if [ -f "$NOTES_FILE" ]; then
             cat "$NOTES_FILE" > release_notes.txt
           else
-            echo "Release v$VERSION_NAME" > release_notes.txt
+            echo "ViVi Fork v$VERSION_NAME" > release_notes.txt
           fi
-          echo -e "\n\n☕ Support development on Ko-fi: https://ko-fi.com/vividhpashokan\n💸 Support via UPI: vividhpashokan@axl\n💳 Support via PayPal: https://www.paypal.me/vividhpashokan" >> release_notes.txt
           
           gh release create "v$VERSION_NAME" release_assets/* \
-            --title "Vivi Music v$VERSION_NAME" \
+            --title "ViVi Fork v$VERSION_NAME" \
             --notes-file release_notes.txt \
             --target main
