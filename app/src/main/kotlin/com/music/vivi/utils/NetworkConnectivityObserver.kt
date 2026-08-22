@@ -57,21 +57,20 @@ class NetworkConnectivityObserver(context: Context) {
     }
     
     /**
-     * Check current connectivity state synchronously
+     * Check current connectivity state synchronously.
+     *
+     * We only require NET_CAPABILITY_INTERNET — NOT NET_CAPABILITY_VALIDATED.
+     * VALIDATED can be absent on valid connections: mobile data in some regions,
+     * VPN tunnels, certain Android 13+ ROM builds, or any network where Android
+     * hasn't finished its captive-portal probe yet. Requiring it caused
+     * isNetworkConnected to read false on working networks, silently routing every
+     * playback error into the exponential-backoff loop and freezing playback.
      */
     fun isCurrentlyConnected(): Boolean {
         return try {
-            val activeNetwork = connectivityManager.activeNetwork
-            val networkCapabilities = connectivityManager.getNetworkCapabilities(activeNetwork)
-            
-            // Check if we have internet capability
-            val hasInternet = networkCapabilities?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) == true
-            
-            // For API 23+, also check if connection is validated
-            val isValidated =
-                networkCapabilities?.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED) == true
-
-            hasInternet && isValidated
+            val activeNetwork = connectivityManager.activeNetwork ?: return false
+            val caps = connectivityManager.getNetworkCapabilities(activeNetwork) ?: return false
+            caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
         } catch (e: Exception) {
             false
         }

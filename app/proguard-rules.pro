@@ -104,12 +104,21 @@
     public static void v(...);
     public static void d(...);
     public static void i(...);
+    public static timber.log.Timber$Tree tag(java.lang.String);
 }
 
 -assumenosideeffects class timber.log.Timber$Forest {
     public static void v(...);
     public static void d(...);
     public static void i(...);
+}
+
+# Strip Timber.tag("TAG").v/.d/.i chain — the tag() call above returns a Tree,
+# and Tree's v/d/i methods must also be stripped to eliminate string-interpolation costs.
+-assumenosideeffects class timber.log.Timber$Tree {
+    public void v(...);
+    public void d(...);
+    public void i(...);
 }
 
 ##──────────────────────────────────────────────────────────────────────────────

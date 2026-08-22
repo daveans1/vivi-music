@@ -554,6 +554,9 @@ class MusicService :
 
         connectivityManager = getSystemService()!!
         connectivityObserver = NetworkConnectivityObserver(this)
+        // Seed the flag synchronously so any error that fires before the
+        // coroutine collects its first value doesn't misclassify as network-offline.
+        isNetworkConnected.value = connectivityObserver.isCurrentlyConnected()
 
         val screenStateFilter = IntentFilter().apply {
             addAction(Intent.ACTION_SCREEN_ON)
