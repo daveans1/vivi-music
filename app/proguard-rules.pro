@@ -314,3 +314,11 @@
 ##──────────────────────────────────────────────────────────────────────────────
 -keep class com.music.innertube.** { *; }
 -keepclassmembers class com.music.innertube.** { *; }
+
+##──────────────────────────────────────────────────────────────────────────────
+## 32. JioSaavn module (audio streaming & models)
+##──────────────────────────────────────────────────────────────────────────────
+-keep class com.music.jiosaavn.** { *; }
+-keepclassmembers class com.music.jiosaavn.** { *; }
+-dontwarn com.music.jiosaavn.**
+

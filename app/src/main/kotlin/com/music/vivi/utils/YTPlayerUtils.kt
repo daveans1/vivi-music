@@ -308,10 +308,30 @@ object YTPlayerUtils {
         return totalScore.coerceIn(0.0, 1.0)
     }
 
+    private suspend fun resolvePlaybackDataWithRetry(
+        videoId: String,
+        playlistId: String? = null,
+        audioQuality: AudioQuality,
+        connectivityManager: ConnectivityManager,
+    ): Result<PlaybackData> {
+        val firstAttempt = resolvePlaybackData(videoId, playlistId, audioQuality, connectivityManager)
+        if (firstAttempt.isFailure && YouTube.cookie == null) {
+            Timber.tag(TAG).w("Playback failed for guest. Rotating session and retrying...")
+            PlaybackLogManager.log(PlaybackLogLevel.BOT, "Playback failed for guest", "Triggering bot detection mitigation (rotating guest session)")
+            BotDetectionMitigator.rotateGuestSession()
+            val retryResult = resolvePlaybackData(videoId, playlistId, audioQuality, connectivityManager)
+            retryResult.onSuccess { BotDetectionMitigator.notifyPlaybackSuccess() }
+            return retryResult
+        }
+        firstAttempt.onSuccess { BotDetectionMitigator.notifyPlaybackSuccess() }
+        return firstAttempt
+    }
+
     /**
-     * Custom player response intended to use for playback and downloading.
-     * Automatically resolves between JioSaavn and YouTube Music based on the user's configured [audioQuality] tier:
-     * - MAX (193-320 kbps): Target 320 kbps from JioSaavn, falling back to YouTube Music highest.
+     * Custom player response for playback with multi-tier audio quality routing.
+     *
+     * Audio quality tiers:
+     * - MAX (193-320 kbps): Target 320 kbps from JioSaavn, falling back to YouTube Music highest stream (Opus 160k/AAC 140k).
      * - HIGH (129-192 kbps): Target 192 kbps from JioSaavn/YouTube, falling back to YouTube Music highest in range.
      * - MEDIUM (65-128 kbps): Target 128 kbps from JioSaavn/YouTube, falling back to YouTube Music in range.
      * - LOW (40-64 kbps): Target 64 kbps from YouTube Music low streams (itag 249/139).
@@ -326,23 +346,13 @@ object YTPlayerUtils {
     ): Result<PlaybackData> {
         // Low Quality: Strictly YouTube Music (40-64 kbps), bypass external search
         if (audioQuality == AudioQuality.LOW) {
-            val firstAttempt = resolvePlaybackData(videoId, playlistId, AudioQuality.LOW, connectivityManager)
-            if (firstAttempt.isFailure && YouTube.cookie == null) {
-                Timber.tag(TAG).w("Playback failed for guest. Rotating session and retrying...")
-                PlaybackLogManager.log(PlaybackLogLevel.BOT, "Playback failed for guest", "Triggering bot detection mitigation (rotating guest session)")
-                BotDetectionMitigator.rotateGuestSession()
-                val retryResult = resolvePlaybackData(videoId, playlistId, AudioQuality.LOW, connectivityManager)
-                retryResult.onSuccess { BotDetectionMitigator.notifyPlaybackSuccess() }
-                return retryResult
-            }
-            firstAttempt.onSuccess { BotDetectionMitigator.notifyPlaybackSuccess() }
-            return firstAttempt
+            return resolvePlaybackDataWithRetry(videoId, playlistId, AudioQuality.LOW, connectivityManager)
         }
 
         // For Max, High, and Medium: Concurrently search JioSaavn while fetching YouTube Music metadata
         return coroutineScope {
             val ytDeferred = async(Dispatchers.IO) {
-                resolvePlaybackData(videoId, playlistId, audioQuality, connectivityManager)
+                resolvePlaybackDataWithRetry(videoId, playlistId, audioQuality, connectivityManager)
             }
 
             val saavnPlayback = runCatching {
@@ -369,8 +379,10 @@ object YTPlayerUtils {
                             expectedDuration = expectedDuration,
                             wantedExplicit = false
                         )
-                    }.filter { it.second >= 0.72 }
+                    }
+                    .filter { it.second >= 0.72 }
                     .sortedByDescending { it.second }
+
                     return scoredCandidates.firstOrNull()?.first
                 }
 
@@ -432,11 +444,11 @@ object YTPlayerUtils {
                         lastModified = null,
                         signatureCipher = null,
                         cipher = null,
-                        audioTrack = null,
+                        audioTrack = null
                     ),
                     streamUrl = streamUrl,
                     streamExpiresInSeconds = 3600,
-                    isSaavnStream = true,
+                    isSaavnStream = true
                 )
             }.getOrNull()
 
