@@ -387,6 +387,20 @@ fun GridItem(
     fillMaxWidth = fillMaxWidth
 )
 
+/**
+ * Standalone composable for download state badge.
+ * Extracted from the default [SongListItem]/[SongGridItem] badge lambda so the
+ * StateFlow collector is an independent, skippable composable node instead of
+ * being embedded inside a lambda capture (which forces a new subscription for
+ * every item even when off-screen in a LazyList).
+ */
+@Composable
+fun RowScope.DownloadBadge(songId: String) {
+    val download by LocalDownloadUtil.current.getDownload(songId)
+        .collectAsState(initial = null)
+    Icon.Download(download?.state)
+}
+
 @Composable
 fun SongListItem(
     song: Song,
@@ -406,9 +420,7 @@ fun SongListItem(
             Icon.Library()
         }
         if (showDownloadIcon) {
-            val download by LocalDownloadUtil.current.getDownload(song.id)
-                .collectAsState(initial = null)
-            Icon.Download(download?.state)
+            DownloadBadge(songId = song.id)
         }
     },
     isSelected: Boolean = false,
@@ -612,8 +624,7 @@ fun SongGridItem(
             Icon.Library()
         }
         if (showDownloadIcon) {
-            val download by LocalDownloadUtil.current.getDownload(song.id).collectAsState(initial = null)
-            Icon.Download(download?.state)
+            DownloadBadge(songId = song.id)
         }
     },
     isActive: Boolean = false,
@@ -627,7 +638,9 @@ fun SongGridItem(
             fontWeight = FontWeight.Bold,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.basicMarquee().fillMaxWidth()
+            modifier = Modifier
+                .fillMaxWidth()
+                .then(if (isActive) Modifier.basicMarquee() else Modifier)
         )
     },
     subtitle = {

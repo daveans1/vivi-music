@@ -156,38 +156,31 @@ class App : Application(), SingletonImageLoader.Factory {
     }
 
     private fun observeSettingsChanges() {
+        // Single combined observer for all YouTube auth state — saves 2 coroutines vs. 3 separate flows
         applicationScope.launch(Dispatchers.IO) {
             dataStore.data
-                .map { it[VisitorDataKey] }
+                .map { prefs ->
+                    Triple(
+                        prefs[VisitorDataKey],
+                        prefs[DataSyncIdKey],
+                        prefs[InnerTubeCookieKey]
+                    )
+                }
                 .distinctUntilChanged()
-                .collect { visitorData ->
+                .collect { (visitorData, dataSyncId, cookie) ->
                     YouTube.visitorData = visitorData?.takeIf { it != "null" }
                         ?: YouTube.visitorData().getOrNull()?.also { newVisitorData ->
                             dataStore.edit { settings ->
                                 settings[VisitorDataKey] = newVisitorData
                             }
                         }
-                }
-        }
 
-        applicationScope.launch(Dispatchers.IO) {
-            dataStore.data
-                .map { it[DataSyncIdKey] }
-                .distinctUntilChanged()
-                .collect { dataSyncId ->
                     YouTube.dataSyncId = dataSyncId?.let {
                         it.takeIf { !it.contains("||") }
                             ?: it.takeIf { it.endsWith("||") }?.substringBefore("||")
                             ?: it.substringAfter("||")
                     }
-                }
-        }
 
-        applicationScope.launch(Dispatchers.IO) {
-            dataStore.data
-                .map { it[InnerTubeCookieKey] }
-                .distinctUntilChanged()
-                .collect { cookie ->
                     try {
                         YouTube.cookie = cookie
                     } catch (e: Exception) {
@@ -275,7 +268,7 @@ class App : Application(), SingletonImageLoader.Factory {
             ViviPrefCache.get(MaxImageCacheSizeKey) ?: 512
         } else 512
         return ImageLoader.Builder(this).apply {
-            crossfade(true)
+        crossfade(durationMillis = 50) // reduced from default 100ms — snappier during fast scroll
             allowHardware(Build.VERSION.SDK_INT >= Build.VERSION_CODES.P)
             // Memory cache for fast image loading (prevents network requests on recomposition)
             memoryCache {

@@ -291,38 +291,41 @@ class HomeViewModel @Inject constructor(
         val likedSongs = database.likedSongsByCreateDateAsc().first()
         if (likedSongs.isEmpty()) return
 
-        val seeds = likedSongs.shuffled().distinctBy { it.id }.take(5)
+        // 3 seeds max (was 5) — each fires 2 network calls; 6 total is enough and
+        // keeps home loading snappy even on slower connections.
+        val seeds = likedSongs.shuffled().distinctBy { it.id }.take(3)
 
-        // Use a synchronized list to collect results safely from concurrent coroutines
         val items = java.util.Collections.synchronizedList(mutableListOf<DailyDiscoverItem>())
 
         kotlinx.coroutines.coroutineScope {
             seeds.map { seed ->
                 launch(Dispatchers.IO) {
-                    val endpoint = YouTube.next(WatchEndpoint(videoId = seed.id)).getOrNull()?.relatedEndpoint
-                    if (endpoint != null) {
-                        YouTube.related(endpoint).onSuccess { page ->
-                            val recommendations = page.songs
-                                .filter { item ->
-                                    if (hideVideoSongs && item.isVideoSong) return@filter false
-                                    if (item.explicit) return@filter false
-                                    true
+                    // 8-second cap per seed so one slow response doesn't delay the rest of home
+                    kotlinx.coroutines.withTimeoutOrNull(8_000L) {
+                        val endpoint = YouTube.next(WatchEndpoint(videoId = seed.id)).getOrNull()?.relatedEndpoint
+                        if (endpoint != null) {
+                            YouTube.related(endpoint).onSuccess { page ->
+                                val recommendations = page.songs
+                                    .filter { item ->
+                                        if (hideVideoSongs && item.isVideoSong) return@filter false
+                                        if (item.explicit) return@filter false
+                                        true
+                                    }
+                                    .shuffled()
+
+                                val recommendation = recommendations.firstOrNull { rec ->
+                                    rec.id != seed.id
                                 }
-                                .shuffled()
 
-                            // Simple check to avoid immediate duplicate of seed
-                            val recommendation = recommendations.firstOrNull { rec ->
-                                rec.id != seed.id
-                            }
-
-                            if (recommendation != null) {
-                                items.add(
-                                    DailyDiscoverItem(
-                                        seed = seed,
-                                        recommendation = recommendation,
-                                        relatedEndpoint = endpoint
+                                if (recommendation != null) {
+                                    items.add(
+                                        DailyDiscoverItem(
+                                            seed = seed,
+                                            recommendation = recommendation,
+                                            relatedEndpoint = endpoint
+                                        )
                                     )
-                                )
+                                }
                             }
                         }
                     }
@@ -330,7 +333,6 @@ class HomeViewModel @Inject constructor(
             }.forEach { it.join() }
         }
 
-        // Final deduplication just in case multiple seeds recommended the same song
         dailyDiscover.value = items.toList().distinctBy { it.recommendation.id }.shuffled()
     }
 
@@ -789,6 +791,7 @@ class HomeViewModel @Inject constructor(
         viewModelScope.launch(Dispatchers.IO) {
             context.dataStore.data
                 .map { it[InnerTubeCookieKey] }
+                .distinctUntilChanged()  // avoid firing accountInfo() on unrelated pref changes
                 .collect { cookie ->
                     // Avoid processing if already processing
                     if (isProcessingAccountData) return@collect

@@ -391,19 +391,37 @@ class MusicService :
     /** Background job that pre-resolves the next track's stream URL into [songUrlCache]. */
     private var prefetchJob: Job? = null
 
+    // Dirty flag: set whenever the queue changes, cleared after each successful save
+    @Volatile private var _queueDirty = false
+
     // URL cache for stream URLs - class-level so it can be invalidated on errors
     private val songUrlCache = HashMap<String, Pair<String, Long>>()
 
     private val sessionKey = java.util.UUID.randomUUID().toString()
     private fun cacheKey(mediaId: String) = "${sessionKey}:$mediaId"
 
+    // TTL-aware playback URL cache: YouTube stream URLs expire in ~6 hours.
+    // Storing (url, insertTimeMs) so we can evict stale entries on access.
+    private val PLAYBACK_URL_TTL_MS = 5 * 60 * 60 * 1000L // 5 hours
     private val playbackUrlCache = java.util.Collections.synchronizedMap(
-        object : java.util.LinkedHashMap<String, String>(0, 0.75f, true) {
-            override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, String>): Boolean {
-                return size > 500
+        object : java.util.LinkedHashMap<String, Pair<String, Long>>(0, 0.75f, true) {
+            override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Pair<String, Long>>): Boolean {
+                return size > 200 // reduced from 500 — expired entries don't need to fill 500 slots
             }
         }
     )
+    private fun getCachedPlaybackUrl(key: String): String? {
+        val entry = playbackUrlCache[key] ?: return null
+        return if (System.currentTimeMillis() - entry.second > PLAYBACK_URL_TTL_MS) {
+            playbackUrlCache.remove(key)
+            null
+        } else {
+            entry.first
+        }
+    }
+    private fun putCachedPlaybackUrl(key: String, url: String) {
+        playbackUrlCache[key] = Pair(url, System.currentTimeMillis())
+    }
 
     // Flag to bypass cache when quality changes - forces fresh stream fetch
     private val bypassCacheForQualityChange = mutableSetOf<String>()
@@ -976,22 +994,20 @@ class MusicService :
             }
         }
 
-        // Save queue periodically to prevent queue loss from crash or force kill
+        // Single periodic queue-save: every 30s always, every 15s while playing.
+        // Saves only when something actually changed (dirty flag set by onMediaItemTransition).
         scope.launch {
+            var lastSaveTime = 0L
             while (isActive) {
-                delay(30.seconds)
-                if (dataStore.get(PersistentQueueKey, true)) {
-                    saveQueueToDisk()
-                }
-            }
-        }
-
-        // Save queue more frequently when playing to ensure state is preserved
-        scope.launch {
-            while (isActive) {
-                delay(10.seconds)
-                if (dataStore.get(PersistentQueueKey, true) && player.isPlaying) {
-                    saveQueueToDisk()
+                val intervalMs = if (player.isPlaying) 15_000L else 30_000L
+                delay(intervalMs)
+                if (dataStore.get(PersistentQueueKey, true) && _queueDirty) {
+                    val now = System.currentTimeMillis()
+                    if (now - lastSaveTime >= intervalMs) {
+                        saveQueueToDisk()
+                        _queueDirty = false
+                        lastSaveTime = now
+                    }
                 }
             }
         }
@@ -1002,13 +1018,8 @@ class MusicService :
         equalizerService.addAudioProcessor(eqProcessor)
 
         val silenceProcessor = SilenceDetectorAudioProcessor { handleLongSilenceDetected() }
-
-        // Set initial state
-        runBlocking {
-            val skipSilence = dataStore.get(SkipSilenceKey, false)
-            val instantSkip = dataStore.get(SkipSilenceInstantKey, false)
-            silenceProcessor.instantModeEnabled = skipSilence && instantSkip
-        }
+        // instantModeEnabled defaults to false; the observer in onCreate() will set the real value
+        // within milliseconds, so no need to block the main thread with runBlocking here.
 
         val player = ExoPlayer.Builder(this)
             .setMediaSourceFactory(createMediaSourceFactory())
@@ -1030,16 +1041,10 @@ class MusicService :
         playerSilenceProcessors[player] = silenceProcessor
 
         player.apply {
-                runBlocking {
-                    val offload = dataStore.get(AudioOffload, false)
-                    val crossfade = dataStore.get(CrossfadeEnabledKey, false)
-                    setOffloadEnabled(if (crossfade) false else offload)
-                    skipSilenceEnabled = dataStore.get(SkipSilenceKey, false)
-                }
-                addAnalyticsListener(PlaybackStatsListener(false, this@MusicService))
-
-                // Cleanup handled manually in onDestroy/release
-            }
+            // Offload and skipSilence defaults — observers in onCreate() apply real prefs immediately
+            skipSilenceEnabled = false
+            addAnalyticsListener(PlaybackStatsListener(false, this@MusicService))
+        }
         _playerFlow.value = player
         return player
     }
@@ -1947,6 +1952,7 @@ class MusicService :
             }
         }
         previousMediaItemIndex = player.currentMediaItemIndex
+        _queueDirty = true  // queue position changed — mark for save
 
         lastPlaybackSpeed = -1.0f // force update song
 
@@ -2179,6 +2185,9 @@ class MusicService :
         }
         if (events.containsAny(EVENT_TIMELINE_CHANGED, EVENT_POSITION_DISCONTINUITY)) {
             currentMediaMetadata.value = player.currentMetadata
+            if (events.contains(EVENT_TIMELINE_CHANGED)) {
+                _queueDirty = true
+            }
         }
 
         // Widget and Discord RPC updates
@@ -2998,7 +3007,7 @@ class MusicService :
                 }
 
                 playbackTrackingUrl?.let {
-                    playbackUrlCache[cacheKey(mediaId)] = it
+                    putCachedPlaybackUrl(cacheKey(mediaId), it)
                 }
 
                 scope.launch(Dispatchers.IO) { recoverSong(mediaId, nonNullPlayback) }
@@ -3082,7 +3091,7 @@ class MusicService :
 
         if (playbackStats.totalPlayTimeMs >= historyDurationMs) {
             CoroutineScope(Dispatchers.IO).launch {
-                val playbackUrl = playbackUrlCache[cacheKey(mediaItem.mediaId)]
+                val playbackUrl = getCachedPlaybackUrl(cacheKey(mediaItem.mediaId))
                     ?: YTPlayerUtils.playerResponseForMetadata(mediaItem.mediaId, null)
                         .getOrNull()?.playbackTracking?.videostatsPlaybackUrl?.baseUrl
 
@@ -3168,6 +3177,7 @@ class MusicService :
                 Timber.tag(TAG).e(it, "Failed to save player state")
                 reportException(it)
             }
+            _queueDirty = false
         } catch (e: Exception) {
             Timber.tag(TAG).e(e, "Error during queue save operation")
             reportException(e)

@@ -98,7 +98,7 @@ fun FloatingNavigationBar(
             horizontalArrangement = Arrangement.spacedBy(4.dp)
         ) {
             leftItems.forEach { screen ->
-                val isSelected = remember(currentRoute, screen.route) {
+                val isSelected = remember(currentRoute, screen.route, navigationItems) {
                     isRouteSelected(currentRoute, screen.route, navigationItems)
                 }
                 FloatingNavItem(
@@ -113,7 +113,7 @@ fun FloatingNavigationBar(
         Spacer(modifier = Modifier.width(16.dp))
 
         // Right Circle Pill: Search (standalone)
-        val isSearchSelected = remember(currentRoute, rightItem.route) {
+        val isSearchSelected = remember(currentRoute, rightItem.route, navigationItems) {
             isRouteSelected(currentRoute, rightItem.route, navigationItems)
         }
         
