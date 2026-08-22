@@ -19,8 +19,6 @@ jobs:
     if: github.actor != 'dependabot[bot]'
     steps:
       - uses: actions/checkout@v4
-        with:
-          submodules: recursive
 
       - name: Set up JDK 21
         uses: actions/setup-java@v5
@@ -36,30 +34,17 @@ jobs:
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
-      - name: Setup FFTW for Android
-        uses: ./.github/actions/setup-fftw
-
       - name: Setup Keystore
-        env:
-          RELEASE_KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
         run: |
-          mkdir -p keystore
-          if [ -n "$RELEASE_KEYSTORE_BASE64" ]; then
-            echo "Using release keystore from GitHub secrets"
-            echo "$RELEASE_KEYSTORE_BASE64" | base64 -d > keystore/release.keystore
-          else
-            echo "Using repository deterministic permanent keystore"
-          fi
+          mkdir -p ~/.android
+          cp keystore/release.keystore ~/.android/debug.keystore
 
       - name: Build Release and Debug APKs
         env:
           LASTFM_API_KEY: ${{ secrets.LASTFM_API_KEY }}
           LASTFM_SECRET: ${{ secrets.LASTFM_SECRET }}
-          STORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD || secrets.STORE_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
-          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
-          ./gradlew assembleUniversalGmsRelease assembleUniversalGmsDebug --no-configuration-cache --console=plain --warning-mode summary -x lint
+          ./gradlew assembleUniversalGmsRelease assembleUniversalGmsDebug --no-configuration-cache --console=plain --warning-mode summary
 
       - name: Upload Release APK (Optimized, Zero Lag)
         uses: actions/upload-artifact@v4
