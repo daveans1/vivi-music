@@ -26,9 +26,6 @@ import com.music.innertube.models.YouTubeClient.Companion.WEB_CREATOR
 import com.music.innertube.models.YouTubeClient.Companion.WEB_REMIX
 import com.music.innertube.models.response.PlayerResponse
 import com.music.vivi.constants.AudioQuality
-import com.music.vivi.constants.EnableSaavnStreamingKey
-import com.music.vivi.constants.SaavnAudioQuality
-import com.music.vivi.constants.SaavnAudioQualityKey
 import com.music.vivi.utils.YTPlayerUtils.MAIN_CLIENT
 import com.music.vivi.utils.YTPlayerUtils.STREAM_FALLBACK_CLIENTS
 import com.music.vivi.utils.YTPlayerUtils.validateStatus
@@ -312,28 +309,29 @@ object YTPlayerUtils {
     }
 
     /**
-     * Custom player response intended to use for playback.
-     * When JioSaavn is enabled: evaluates JioSaavn 320k vs. YouTube highest quality and picks
-     * the maximum fidelity stream.
-     * When JioSaavn is disabled: strictly follows the user's configured [audioQuality] setting via YouTube Music.
+     * Custom player response intended to use for playback and downloading.
+     * Automatically resolves between JioSaavn and YouTube Music based on the user's configured [audioQuality] tier:
+     * - MAX (193-320 kbps): Target 320 kbps from JioSaavn, falling back to YouTube Music highest.
+     * - HIGH (129-192 kbps): Target 192 kbps from JioSaavn/YouTube, falling back to YouTube Music highest in range.
+     * - MEDIUM (65-128 kbps): Target 128 kbps from JioSaavn/YouTube, falling back to YouTube Music in range.
+     * - LOW (40-64 kbps): Target 64 kbps from YouTube Music low streams (itag 249/139).
      */
     suspend fun playerResponseForPlayback(
         videoId: String,
         playlistId: String? = null,
         audioQuality: AudioQuality,
         connectivityManager: ConnectivityManager,
+        isDownload: Boolean = false,
         context: android.content.Context? = null,
     ): Result<PlaybackData> {
-        val saavnEnabled = context?.dataStore?.get(EnableSaavnStreamingKey, false) ?: false
-
-        // Standard YouTube Mode: When JioSaavn is OFF, execute strictly via standard YouTube player pipeline
-        if (!saavnEnabled) {
-            val firstAttempt = resolvePlaybackData(videoId, playlistId, audioQuality, connectivityManager)
+        // Low Quality: Strictly YouTube Music (40-64 kbps), bypass external search
+        if (audioQuality == AudioQuality.LOW) {
+            val firstAttempt = resolvePlaybackData(videoId, playlistId, AudioQuality.LOW, connectivityManager)
             if (firstAttempt.isFailure && YouTube.cookie == null) {
                 Timber.tag(TAG).w("Playback failed for guest. Rotating session and retrying...")
                 PlaybackLogManager.log(PlaybackLogLevel.BOT, "Playback failed for guest", "Triggering bot detection mitigation (rotating guest session)")
                 BotDetectionMitigator.rotateGuestSession()
-                val retryResult = resolvePlaybackData(videoId, playlistId, audioQuality, connectivityManager)
+                val retryResult = resolvePlaybackData(videoId, playlistId, AudioQuality.LOW, connectivityManager)
                 retryResult.onSuccess { BotDetectionMitigator.notifyPlaybackSuccess() }
                 return retryResult
             }
@@ -341,11 +339,10 @@ object YTPlayerUtils {
             return firstAttempt
         }
 
-        // JioSaavn Maximum Fidelity Mode:
-        // Resolve YouTube high-quality stream concurrently while searching JioSaavn for 320k match
+        // For Max, High, and Medium: Concurrently search JioSaavn while fetching YouTube Music metadata
         return coroutineScope {
             val ytDeferred = async(Dispatchers.IO) {
-                resolvePlaybackData(videoId, playlistId, AudioQuality.HIGH, connectivityManager)
+                resolvePlaybackData(videoId, playlistId, audioQuality, connectivityManager)
             }
 
             val saavnPlayback = runCatching {
@@ -357,8 +354,6 @@ object YTPlayerUtils {
                 val artistNames = if (author.isNotBlank()) listOf(author) else emptyList()
                 val expectedDuration = ytResult.videoDetails?.lengthSeconds?.toIntOrNull()
 
-                // Clean search queries
-                // Also check if cleanTitle has "Artist - Song", extract pure song title for targeted search
                 val pureSongTitle = if (cleanTitle.contains(" - ")) cleanTitle.substringAfter(" - ").trim() else cleanTitle
                 val primaryQuery = if (author.isNotBlank()) "$pureSongTitle $author" else cleanTitle
                 val fallbackQuery = if (pureSongTitle != cleanTitle) pureSongTitle else cleanTitle
@@ -386,13 +381,32 @@ object YTPlayerUtils {
 
                 if (bestSong == null) return@runCatching null
 
-                var streamUrl = SaavnService.selectBestUrl(bestSong.downloadUrl, "320kbps")
-                if (streamUrl.isNullOrBlank()) {
-                    streamUrl = SaavnService.getBestStreamUrl(bestSong.id, "320kbps")
+                val minKbps = audioQuality.minBitrate / 1000
+                val maxKbps = audioQuality.maxBitrate / 1000
+                val targetKbps = audioQuality.targetDownloadBitrate / 1000
+
+                val selectedStream = SaavnService.selectUrlForBitrateTier(
+                    bestSong.downloadUrl,
+                    minKbps = minKbps,
+                    maxKbps = maxKbps,
+                    targetKbps = targetKbps
+                ) ?: run {
+                    val fallbackQuality = when (audioQuality) {
+                        AudioQuality.MAX -> "320kbps"
+                        AudioQuality.HIGH -> "160kbps"
+                        AudioQuality.MEDIUM -> "96kbps"
+                        AudioQuality.LOW -> "48kbps"
+                    }
+                    val url = SaavnService.selectBestUrl(bestSong.downloadUrl, fallbackQuality)
+                        ?: SaavnService.getBestStreamUrl(bestSong.id, fallbackQuality)
+                    url?.let { it to targetKbps }
                 }
+
+                val streamUrl = selectedStream?.first
+                val streamBitrateKbps = selectedStream?.second ?: targetKbps
                 if (streamUrl.isNullOrBlank()) return@runCatching null
 
-                Timber.tag(TAG).i("Saavn: verified 320 kbps match \"${bestSong.name}\" for videoId=$videoId")
+                Timber.tag(TAG).i("Saavn: matched \"${bestSong.name}\" at ${streamBitrateKbps}kbps for videoId=$videoId (tier=$audioQuality)")
 
                 PlaybackData(
                     audioConfig = ytResult.audioConfig,
@@ -402,15 +416,15 @@ object YTPlayerUtils {
                         itag = 141,
                         url = streamUrl,
                         mimeType = "audio/mp4; codecs=\"mp4a.40.2\"",
-                        bitrate = 320_000,
+                        bitrate = streamBitrateKbps * 1000,
                         width = null,
                         height = null,
                         contentLength = null,
-                        quality = "320kbps",
+                        quality = "${streamBitrateKbps}kbps",
                         fps = null,
                         qualityLabel = null,
                         averageBitrate = null,
-                        audioQuality = "320kbps",
+                        audioQuality = "${streamBitrateKbps}kbps",
                         approxDurationMs = null,
                         audioSampleRate = 44100,
                         audioChannels = 2,
@@ -429,7 +443,7 @@ object YTPlayerUtils {
             if (saavnPlayback != null) {
                 Result.success(saavnPlayback)
             } else {
-                Timber.tag(TAG).d("JioSaavn 320k not matched — returning YouTube HIGH quality stream")
+                Timber.tag(TAG).d("JioSaavn not matched for tier $audioQuality — returning YouTube Music stream")
                 ytDeferred.await()
             }
         }
@@ -849,15 +863,41 @@ object YTPlayerUtils {
     ): PlayerResponse.StreamingData.Format? {
         Timber.tag(logTag).d("Finding format with audioQuality: $audioQuality, network metered: ${connectivityManager.isActiveNetworkMetered}")
 
-        val format = playerResponse.streamingData?.adaptiveFormats
-            ?.filter { it.isAudio && it.isOriginal }
-            ?.maxByOrNull {
-                it.bitrate * when (audioQuality) {
-                    AudioQuality.AUTO -> if (connectivityManager.isActiveNetworkMetered) -1 else 1
-                    AudioQuality.HIGH -> 1
-                    AudioQuality.LOW -> -1
-                } + (if (it.mimeType.startsWith("audio/webm")) 10240 else 0) // prefer opus stream
+        val formats = playerResponse.streamingData?.adaptiveFormats
+            ?.filter { it.isAudio && it.isOriginal } ?: return null
+
+        val format = when (audioQuality) {
+            AudioQuality.MAX -> {
+                // Tier: 193-320 kbps (or highest available format, prioritizing Opus)
+                formats.maxByOrNull {
+                    it.bitrate + (if (it.mimeType.startsWith("audio/webm")) 10240 else 0)
+                }
             }
+            AudioQuality.HIGH -> {
+                // Tier: 129-192 kbps (e.g. itag 251 Opus ~160k, itag 140 AAC ~140k)
+                val inRange = formats.filter { it.bitrate in 129_000..192_000 }
+                inRange.maxByOrNull {
+                    it.bitrate + (if (it.mimeType.startsWith("audio/webm")) 10240 else 0)
+                } ?: formats.maxByOrNull {
+                    it.bitrate + (if (it.mimeType.startsWith("audio/webm")) 10240 else 0)
+                }
+            }
+            AudioQuality.MEDIUM -> {
+                // Tier: 65-128 kbps (e.g. itag 140 AAC ~128k, itag 250 Opus ~70k)
+                val inRange = formats.filter { it.bitrate in 65_000..128_000 }
+                inRange.maxByOrNull {
+                    it.bitrate + (if (it.mimeType.startsWith("audio/webm")) 10240 else 0)
+                } ?: formats.minByOrNull {
+                    Math.abs(it.bitrate - 128_000)
+                }
+            }
+            AudioQuality.LOW -> {
+                // Tier: 40-64 kbps (e.g. itag 249 Opus ~50k, itag 139 AAC ~48k)
+                val inRange = formats.filter { it.bitrate in 40_000..64_000 }
+                inRange.minByOrNull { it.bitrate }
+                    ?: formats.minByOrNull { it.bitrate }
+            }
+        }
 
         if (format != null) {
             Timber.tag(logTag).d("Selected format: ${format.mimeType}, bitrate: ${format.bitrate}")

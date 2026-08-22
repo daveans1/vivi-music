@@ -92,7 +92,6 @@ import com.music.vivi.ui.component.Material3MenuItemData
 import com.music.vivi.ui.component.NewAction
 import com.music.vivi.ui.component.NewActionGrid
 import com.music.vivi.ui.component.VolumeSlider
-import com.music.vivi.constants.EnableSaavnStreamingKey
 import com.music.vivi.utils.rememberPreference
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -129,7 +128,6 @@ fun PlayerMenu(
     
     val librarySong by database.song(mediaMetadata.id).collectAsState(initial = null)
     val coroutineScope = rememberCoroutineScope()
-    val (saavnEnabled) = rememberPreference(EnableSaavnStreamingKey, defaultValue = false)
 
     val download by LocalDownloadUtil.current.getDownload(mediaMetadata.id)
         .collectAsState(initial = null)
@@ -355,12 +353,7 @@ fun PlayerMenu(
                         Material3MenuItemData(
                             title = { Text(text = stringResource(R.string.retry_stream)) },
                             description = {
-                                Text(
-                                    text = if (saavnEnabled)
-                                        stringResource(R.string.retry_stream_desc_saavn)
-                                    else
-                                        stringResource(R.string.retry_stream_desc_yt)
-                                )
+                                Text(text = stringResource(R.string.retry_stream_desc))
                             },
                             icon = {
                                 Icon(

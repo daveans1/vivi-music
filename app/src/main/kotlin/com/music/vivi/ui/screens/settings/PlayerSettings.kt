@@ -42,9 +42,7 @@ import com.music.vivi.constants.AudioNormalizationKey
 import com.music.vivi.constants.AudioOffload
 import com.music.vivi.constants.AudioQuality
 import com.music.vivi.constants.AudioQualityKey
-import com.music.vivi.constants.EnableSaavnStreamingKey
-import com.music.vivi.constants.SaavnAudioQuality
-import com.music.vivi.constants.SaavnAudioQualityKey
+import com.music.vivi.constants.DownloadAudioQualityKey
 import com.music.vivi.constants.AutoDownloadOnLikeKey
 import com.music.vivi.constants.CrossfadeDurationKey
 import com.music.vivi.constants.CrossfadeEnabledKey
@@ -83,9 +81,13 @@ fun PlayerSettings(
     navController: NavController,
     scrollBehavior: TopAppBarScrollBehavior,
 ) {
-    val (audioQuality, onAudioQualityChange) = rememberEnumPreference(
+    val (streamingAudioQuality, onStreamingAudioQualityChange) = rememberEnumPreference(
         AudioQualityKey,
-        defaultValue = AudioQuality.AUTO
+        defaultValue = AudioQuality.MAX
+    )
+    val (downloadAudioQuality, onDownloadAudioQualityChange) = rememberEnumPreference(
+        DownloadAudioQualityKey,
+        defaultValue = AudioQuality.MAX
     )
     val (crossfadeEnabled, onCrossfadeEnabledChange) = rememberPreference(
         CrossfadeEnabledKey,
@@ -187,33 +189,49 @@ fun PlayerSettings(
         HistoryDuration,
         defaultValue = 30f
     )
-    val (saavnEnabled, _) = rememberPreference(
-        EnableSaavnStreamingKey,
-        defaultValue = false
-    )
-    val (saavnQuality, _) = rememberEnumPreference(
-        SaavnAudioQualityKey,
-        defaultValue = SaavnAudioQuality.QUALITY_320
-    )
-
-    var showAudioQualityDialog by remember {
+    var showStreamingAudioQualityDialog by remember {
+        mutableStateOf(false)
+    }
+    var showDownloadAudioQualityDialog by remember {
         mutableStateOf(false)
     }
 
-    if (showAudioQualityDialog) {
+    if (showStreamingAudioQualityDialog) {
         EnumDialog(
-            onDismiss = { showAudioQualityDialog = false },
+            onDismiss = { showStreamingAudioQualityDialog = false },
             onSelect = {
-                onAudioQualityChange(it)
-                showAudioQualityDialog = false
+                onStreamingAudioQualityChange(it)
+                showStreamingAudioQualityDialog = false
             },
-            title = stringResource(R.string.audio_quality),
-            current = audioQuality,
+            title = stringResource(R.string.streaming_audio_quality),
+            current = streamingAudioQuality,
             values = AudioQuality.values().toList(),
             valueText = {
                 when (it) {
-                    AudioQuality.AUTO -> stringResource(R.string.audio_quality_auto)
+                    AudioQuality.MAX -> stringResource(R.string.audio_quality_max)
                     AudioQuality.HIGH -> stringResource(R.string.audio_quality_high)
+                    AudioQuality.MEDIUM -> stringResource(R.string.audio_quality_medium)
+                    AudioQuality.LOW -> stringResource(R.string.audio_quality_low)
+                }
+            }
+        )
+    }
+
+    if (showDownloadAudioQualityDialog) {
+        EnumDialog(
+            onDismiss = { showDownloadAudioQualityDialog = false },
+            onSelect = {
+                onDownloadAudioQualityChange(it)
+                showDownloadAudioQualityDialog = false
+            },
+            title = stringResource(R.string.download_audio_quality),
+            current = downloadAudioQuality,
+            values = AudioQuality.values().toList(),
+            valueText = {
+                when (it) {
+                    AudioQuality.MAX -> stringResource(R.string.audio_quality_max)
+                    AudioQuality.HIGH -> stringResource(R.string.audio_quality_high)
+                    AudioQuality.MEDIUM -> stringResource(R.string.audio_quality_medium)
                     AudioQuality.LOW -> stringResource(R.string.audio_quality_low)
                 }
             }
@@ -267,33 +285,34 @@ fun PlayerSettings(
             items = buildList {
                 add(Material3SettingsItem(
                     icon = painterResource(R.drawable.graphic_eq),
-                    title = { Text(stringResource(R.string.audio_quality)) },
+                    title = { Text(stringResource(R.string.streaming_audio_quality)) },
                     description = {
                         Text(
-                            when (audioQuality) {
-                                AudioQuality.AUTO -> stringResource(R.string.audio_quality_auto)
+                            when (streamingAudioQuality) {
+                                AudioQuality.MAX -> stringResource(R.string.audio_quality_max)
                                 AudioQuality.HIGH -> stringResource(R.string.audio_quality_high)
+                                AudioQuality.MEDIUM -> stringResource(R.string.audio_quality_medium)
                                 AudioQuality.LOW -> stringResource(R.string.audio_quality_low)
                             }
                         )
                     },
-                    onClick = { showAudioQualityDialog = true },
+                    onClick = { showStreamingAudioQualityDialog = true },
                     isExpressive = true
                 ))
-                // JioSaavn settings navigation
                 add(Material3SettingsItem(
-                    icon = painterResource(R.drawable.graphic_eq),
-                    title = { Text(stringResource(R.string.jiosaavn_settings)) },
+                    icon = painterResource(R.drawable.download),
+                    title = { Text(stringResource(R.string.download_audio_quality)) },
                     description = {
                         Text(
-                            if (saavnEnabled) {
-                                saavnQuality.toLabel()
-                            } else {
-                                stringResource(R.string.jiosaavn_streaming_disabled)
+                            when (downloadAudioQuality) {
+                                AudioQuality.MAX -> stringResource(R.string.audio_quality_max)
+                                AudioQuality.HIGH -> stringResource(R.string.audio_quality_high)
+                                AudioQuality.MEDIUM -> stringResource(R.string.audio_quality_medium)
+                                AudioQuality.LOW -> stringResource(R.string.audio_quality_low)
                             }
                         )
                     },
-                    onClick = { navController.navigate("settings/player/jio") },
+                    onClick = { showDownloadAudioQualityDialog = true },
                     isExpressive = true
                 ))
                 add(Material3SettingsItem(

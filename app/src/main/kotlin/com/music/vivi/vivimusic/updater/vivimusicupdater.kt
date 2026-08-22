@@ -736,6 +736,24 @@ fun isNewerVersion(latestVersion: String, currentVersion: String): Boolean {
     return false
 }
 
+private fun fetchHttpJson(urlString: String): String {
+    val url = URL(urlString)
+    val connection = url.openConnection() as java.net.HttpURLConnection
+    connection.requestMethod = "GET"
+    connection.connectTimeout = 15000
+    connection.readTimeout = 15000
+    connection.setRequestProperty("User-Agent", "ViVi-Music-App/${BuildConfig.VERSION_NAME}")
+    connection.setRequestProperty("Accept", "application/vnd.github.v3+json")
+    connection.instanceFollowRedirects = true
+    connection.connect()
+
+    val responseCode = connection.responseCode
+    if (responseCode !in 200..299) {
+        throw java.io.IOException("HTTP error response: $responseCode for $urlString")
+    }
+    return connection.inputStream.bufferedReader().use { it.readText() }
+}
+
 // Fetches ALL releases, finds the latest version > current, and returns its info
 suspend fun checkForUpdate(
     context: Context,
@@ -744,8 +762,7 @@ suspend fun checkForUpdate(
 ) {
     withContext(Dispatchers.IO) {
         try {
-            val url = URL(com.music.vivi.constants.GithubConfig.RELEASES_API_URL)
-            val json = url.openStream().bufferedReader().use { it.readText() }
+            val json = fetchHttpJson(com.music.vivi.constants.GithubConfig.RELEASES_API_URL)
             val releases = JSONArray(json)
             
             val currentVersion = BuildConfig.VERSION_NAME
@@ -757,8 +774,7 @@ suspend fun checkForUpdate(
 
             if (betaEnabled) {
                 try {
-                    val nightlyUrl = URL(com.music.vivi.constants.GithubConfig.NIGHTLY_ACTIONS_API_URL)
-                    val nightlyJson = nightlyUrl.openStream().bufferedReader().use { it.readText() }
+                    val nightlyJson = fetchHttpJson(com.music.vivi.constants.GithubConfig.NIGHTLY_ACTIONS_API_URL)
                     val nightlyData = JSONObject(nightlyJson)
                     val runs = nightlyData.optJSONArray("workflow_runs")
                     if (runs != null && runs.length() > 0) {
@@ -897,8 +913,8 @@ suspend fun checkForUpdate(
                     var imageUrl: String? = null
                     try {
                         val changelogUrl =
-                            URL("https://github.com/${com.music.vivi.constants.GithubConfig.REPO_OWNER}/${com.music.vivi.constants.GithubConfig.REPO_NAME}/releases/download/$tagWithPrefix/changelog.json")
-                        val changelogJson = changelogUrl.openStream().bufferedReader().use { it.readText() }
+                            "https://github.com/${com.music.vivi.constants.GithubConfig.REPO_OWNER}/${com.music.vivi.constants.GithubConfig.REPO_NAME}/releases/download/$tagWithPrefix/changelog.json"
+                        val changelogJson = fetchHttpJson(changelogUrl)
                         val changelogData = JSONObject(changelogJson)
 
                         description = changelogData.optString("description").takeIf { it.isNotEmpty() }

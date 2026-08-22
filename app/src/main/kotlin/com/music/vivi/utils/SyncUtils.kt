@@ -436,17 +436,6 @@ class SyncUtils @Inject constructor(
                 try {
                     val remoteSongs = page.songs
                     val remoteIds = remoteSongs.map { it.id }.toSet()
-                    val localSongs = database.likedSongsByNameAsc().first()
-
-                    // Remove likes from songs not in remote
-                    localSongs.filterNot { it.id in remoteIds }.forEach { song ->
-                        try {
-                            database.update(song.song.localToggleLike())
-                            delay(DB_OPERATION_DELAY_MS)
-                        } catch (e: Exception) {
-                            Timber.e(e, "Failed to update song: ${song.id}")
-                        }
-                    }
 
                     // Add/update songs from remote
                     val now = LocalDateTime.now()
@@ -502,16 +491,6 @@ class SyncUtils @Inject constructor(
                 try {
                     val remoteSongs = page.items.filterIsInstance<SongItem>().reversed()
                     val remoteIds = remoteSongs.map { it.id }.toSet()
-                    val localSongs = database.songsByNameAsc().first()
-
-                    localSongs.filterNot { it.id in remoteIds }.forEach { song ->
-                        try {
-                            database.update(song.song.toggleLibrary())
-                            delay(DB_OPERATION_DELAY_MS)
-                        } catch (e: Exception) {
-                            Timber.e(e, "Failed to update song: ${song.id}")
-                        }
-                    }
 
                     remoteSongs.forEach { song ->
                         try {
@@ -572,22 +551,6 @@ class SyncUtils @Inject constructor(
                     remoteSongs.forEachIndexed { index, song ->
                         Timber.d("[UPLOAD_DEBUG] Remote song $index: id=${song.id}, title=${song.title}, artists=${song.artists.map { it.name }}")
                     }
-                    val remoteIds = remoteSongs.map { it.id }.toSet()
-                    val localSongs = database.uploadedSongsByNameAsc().first()
-                    Timber.d("[UPLOAD_DEBUG] Local uploaded songs count: ${localSongs.size}")
-
-                    val songsToRemove = localSongs.filterNot { it.id in remoteIds }
-                    Timber.d("[UPLOAD_DEBUG] Songs to remove from uploaded: ${songsToRemove.size}")
-                    songsToRemove.forEach { song ->
-                        try {
-                            Timber.d("[UPLOAD_DEBUG] Removing uploaded flag from: ${song.id}")
-                            database.update(song.song.toggleUploaded())
-                            delay(DB_OPERATION_DELAY_MS)
-                        } catch (e: Exception) {
-                            Timber.e(e, "[UPLOAD_DEBUG] Failed to update song: ${song.id}")
-                        }
-                    }
-
                     remoteSongs.forEach { song ->
                         try {
                             val dbSong = database.song(song.id).firstOrNull()
@@ -693,17 +656,6 @@ class SyncUtils @Inject constructor(
             result.onSuccess { page ->
                 try {
                     val remoteAlbums = page.items.filterIsInstance<AlbumItem>().reversed()
-                    val remoteIds = remoteAlbums.map { it.id }.toSet()
-                    val localAlbums = database.albumsUploadedByNameAsc().first()
-
-                    localAlbums.filterNot { it.id in remoteIds }.forEach { album ->
-                        try {
-                            database.update(album.album.toggleUploaded())
-                            delay(DB_OPERATION_DELAY_MS)
-                        } catch (e: Exception) {
-                            Timber.e(e, "Failed to update album: ${album.id}")
-                        }
-                    }
 
                     remoteAlbums.forEach { album ->
                         try {
@@ -757,17 +709,6 @@ class SyncUtils @Inject constructor(
             result.onSuccess { page ->
                 try {
                     val remoteArtists = page.items.filterIsInstance<ArtistItem>()
-                    val remoteIds = remoteArtists.map { it.id }.toSet()
-                    val localArtists = database.artistsBookmarkedByNameAsc().first()
-
-                    localArtists.filterNot { it.id in remoteIds }.forEach { artist ->
-                        try {
-                            database.update(artist.artist.localToggleLike())
-                            delay(DB_OPERATION_DELAY_MS)
-                        } catch (e: Exception) {
-                            Timber.e(e, "Failed to update artist: ${artist.id}")
-                        }
-                    }
 
                     remoteArtists.forEach { artist ->
                         try {

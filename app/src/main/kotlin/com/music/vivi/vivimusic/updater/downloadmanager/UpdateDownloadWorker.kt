@@ -42,17 +42,40 @@ class UpdateDownloadWorker(private val context: Context, workerParams: WorkerPar
         DownloadNotificationManager.showDownloadStarting(version, fileSize)
 
         try {
-            val url = URL(apkUrl)
-            val connection = url.openConnection() as HttpURLConnection
-            connection.requestMethod = "GET"
-            connection.connectTimeout = 15000
-            connection.readTimeout = 15000
-            connection.connect()
+            var currentUrl = apkUrl
+            var connection: HttpURLConnection? = null
+            var redirectCount = 0
+            while (true) {
+                val url = URL(currentUrl)
+                val conn = url.openConnection() as HttpURLConnection
+                conn.requestMethod = "GET"
+                conn.connectTimeout = 20000
+                conn.readTimeout = 20000
+                conn.setRequestProperty("User-Agent", "ViVi-Music-App/${com.music.vivi.BuildConfig.VERSION_NAME}")
+                conn.instanceFollowRedirects = true
+                conn.connect()
 
-            if (connection.responseCode != HttpURLConnection.HTTP_OK) {
+                val responseCode = conn.responseCode
+                if (responseCode == HttpURLConnection.HTTP_MOVED_TEMP ||
+                    responseCode == HttpURLConnection.HTTP_MOVED_PERM ||
+                    responseCode == HttpURLConnection.HTTP_SEE_OTHER ||
+                    responseCode == 307 || responseCode == 308) {
+                    val location = conn.getHeaderField("Location")
+                    if (!location.isNullOrBlank() && redirectCount < 5) {
+                        redirectCount++
+                        currentUrl = location
+                        conn.disconnect()
+                        continue
+                    }
+                }
+                connection = conn
+                break
+            }
+
+            if (connection == null || connection.responseCode != HttpURLConnection.HTTP_OK) {
                 DownloadNotificationManager.showDownloadFailed(
                     version,
-                    context.getString(R.string.server_error, connection.responseCode)
+                    context.getString(R.string.server_error, connection?.responseCode ?: -1)
                 )
                 return@withContext Result.failure()
             }

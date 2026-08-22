@@ -64,25 +64,27 @@ jobs:
             echo "Release v$VERSION_NAME does not exist. Proceeding with release."
           fi
 
-      - name: Generate debug.keystore
+      - name: Setup Keystore
         if: steps.check_release.outputs.exists == 'false'
+        env:
+          RELEASE_KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
         run: |
-          mkdir -p ~/.android
-          keytool -genkey -v \
-            -keystore ~/.android/debug.keystore \
-            -storepass android \
-            -alias androiddebugkey \
-            -keypass android \
-            -keyalg RSA \
-            -keysize 2048 \
-            -validity 10000 \
-            -dname "CN=Android Debug,O=Android,C=US"
+          mkdir -p keystore
+          if [ -n "$RELEASE_KEYSTORE_BASE64" ]; then
+            echo "Using release keystore from GitHub secrets"
+            echo "$RELEASE_KEYSTORE_BASE64" | base64 -d > keystore/release.keystore
+          else
+            echo "Using repository deterministic permanent keystore"
+          fi
 
       - name: Build GMS Release APK
         if: steps.check_release.outputs.exists == 'false'
         env:
           LASTFM_API_KEY: ${{ secrets.LASTFM_API_KEY }}
           LASTFM_SECRET: ${{ secrets.LASTFM_SECRET }}
+          STORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD || secrets.STORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: ./gradlew assembleUniversalGmsRelease --no-configuration-cache --console=plain --warning-mode summary -x lint
 
       - name: Build FOSS Release APK
@@ -90,6 +92,9 @@ jobs:
         env:
           LASTFM_API_KEY: ${{ secrets.LASTFM_API_KEY }}
           LASTFM_SECRET: ${{ secrets.LASTFM_SECRET }}
+          STORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD || secrets.STORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: ./gradlew assembleUniversalFossRelease --no-configuration-cache --console=plain --warning-mode summary -x lint
 
       - name: Prepare Release Assets

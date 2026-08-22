@@ -948,9 +948,6 @@ est irréversible.
     <string name="show_comment_button_description">Afficher un bouton permettant de consulter les commentaires dans la file d\'attente du lecteur</string>
     <string name="build_stable">STABLE</string>
     <string name="build_nightly">NIGHTLY</string>
-    <string name="jiosaavn_settings">Paramètres de JioSaavn</string>
-    <string name="jiosaavn_streaming_disabled">Désactivé</string>
-    <string name="jiosaavn_beta_info">Cette fonctionnalité est actuellement en version bêta ; veuillez ne pas signaler de problèmes liés à JioSaavn. Si JioSaavn est activé et qu\’un morceau n\’est pas disponible sur cette plateforme, YouTube Music sera utilisé comme source alternative. Le téléchargement à 320 kbps est également pris en charge lors de l\’utilisation de JioSaavn.</string>
 
 	<!-- Spotify Import -->
     <string name="spotify">Spotify</string>

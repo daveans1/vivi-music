@@ -115,19 +115,52 @@ val YtmSyncKey = booleanPreferencesKey("ytmSync")
 val SelectedYtmPlaylistsKey = stringPreferencesKey("selectedYtmPlaylists")
 
 val AudioQualityKey = stringPreferencesKey("audioQuality")
+val DownloadAudioQualityKey = stringPreferencesKey("downloadAudioQuality")
 val IpVersionKey = stringPreferencesKey("ipVersion")
 
 enum class AudioQuality {
-    AUTO,
+    MAX,
     HIGH,
-    LOW,
+    MEDIUM,
+    LOW;
+
+    val minBitrate: Int
+        get() = when (this) {
+            MAX -> 193_000
+            HIGH -> 129_000
+            MEDIUM -> 65_000
+            LOW -> 40_000
+        }
+
+    val maxBitrate: Int
+        get() = when (this) {
+            MAX -> 320_000
+            HIGH -> 192_000
+            MEDIUM -> 128_000
+            LOW -> 64_000
+        }
+
+    val targetDownloadBitrate: Int
+        get() = when (this) {
+            MAX -> 320_000
+            HIGH -> 192_000
+            MEDIUM -> 128_000
+            LOW -> 64_000
+        }
+
+    companion object {
+        fun fromPreference(value: String?): AudioQuality = when (value?.uppercase()) {
+            "MAX" -> MAX
+            "HIGH" -> HIGH
+            "MEDIUM" -> MEDIUM
+            "LOW" -> LOW
+            "AUTO" -> HIGH
+            else -> MAX
+        }
+    }
 }
 
 val AudioOffload = booleanPreferencesKey("enableOffload")
-
-// JioSaavn streaming
-val EnableSaavnStreamingKey = booleanPreferencesKey("enableSaavnStreaming")
-val SaavnAudioQualityKey    = stringPreferencesKey("saavnAudioQuality")
 
 // Cipher Deobfuscation settings
 val EnableAutoCipherFetchKey = booleanPreferencesKey("enableAutoCipherFetch")
@@ -144,24 +177,6 @@ val TasteBasedReleaseNotificationsKey = booleanPreferencesKey("tasteBasedRelease
 val AutoBackupEnabledKey = booleanPreferencesKey("autoBackupEnabled")
 val AutoBackupWeeklyKey = booleanPreferencesKey("autoBackupWeekly")
 val AutoBackupBeforeUpdateKey = booleanPreferencesKey("autoBackupBeforeUpdate")
-
-enum class SaavnAudioQuality {
-    QUALITY_320,
-    QUALITY_160,
-    QUALITY_96;
-
-    fun toApiValue() = when (this) {
-        QUALITY_320 -> "320kbps"
-        QUALITY_160 -> "160kbps"
-        QUALITY_96  -> "96kbps"
-    }
-
-    fun toLabel() = when (this) {
-        QUALITY_320 -> "High (320 kbps)"
-        QUALITY_160 -> "Medium (160 kbps)"
-        QUALITY_96  -> "Low (96 kbps)"
-    }
-}
 
 val PersistentQueueKey = booleanPreferencesKey("persistentQueue")
 val PersistentShuffleAcrossQueuesKey = booleanPreferencesKey("persistentShuffleAcrossQueues")

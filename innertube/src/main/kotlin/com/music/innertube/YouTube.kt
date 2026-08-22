@@ -821,10 +821,11 @@ object YouTube {
             ).body<BrowseResponse>()
 
             val tabs = response.contents?.singleColumnBrowseResultsRenderer?.tabs
-            val contents = if (tabs != null && tabs.size >= tabIndex) {
+            val contents = if (tabs != null && tabs.size > tabIndex) {
                 tabs[tabIndex].tabRenderer.content?.sectionListRenderer?.contents?.firstOrNull()
             } else {
-                null
+                response.contents?.sectionListRenderer?.contents?.firstOrNull()
+                    ?: response.contents?.twoColumnBrowseResultsRenderer?.secondaryContents?.sectionListRenderer?.contents?.firstOrNull()
             }
 
             when {

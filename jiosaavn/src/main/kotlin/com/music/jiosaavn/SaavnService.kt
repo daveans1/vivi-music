@@ -351,6 +351,49 @@ object SaavnService {
     }
 
     /**
+     * Parse numeric kbps from JioSaavn quality string (e.g. "320kbps" -> 320, "160 kbps" -> 160).
+     */
+    private fun parseKbps(quality: String): Int {
+        return Regex("""\d+""").find(quality)?.value?.toIntOrNull() ?: 0
+    }
+
+    /**
+     * Choose the best stream URL within the given bitrate range [minKbps, maxKbps] targeting [targetKbps].
+     */
+    fun selectUrlForBitrateTier(
+        urls: List<SaavnDownloadUrl>,
+        minKbps: Int,
+        maxKbps: Int,
+        targetKbps: Int
+    ): Pair<String, Int>? {
+        val filteredUrls = urls.filter { it.url.isNotBlank() }
+        if (filteredUrls.isEmpty()) return null
+
+        // Map each URL to its parsed kbps
+        val withBitrate = filteredUrls.map { it to parseKbps(it.quality) }
+        
+        // 1. Try to find streams within the range [minKbps, maxKbps]
+        val inRange = withBitrate.filter { it.second in minKbps..maxKbps }
+        if (inRange.isNotEmpty()) {
+            // Find closest to targetKbps without exceeding maxKbps
+            val best = inRange.minByOrNull { Math.abs(it.second - targetKbps) }
+            if (best != null) {
+                Log.d(TAG, "selectUrlForBitrateTier: selected in-range ${best.first.quality} for target ${targetKbps}k: ${best.first.url}")
+                return best.first.url to best.second
+            }
+        }
+
+        // 2. If no stream within exact range, find closest available
+        val bestOverall = withBitrate.minByOrNull { Math.abs(it.second - targetKbps) }
+        if (bestOverall != null) {
+            Log.d(TAG, "selectUrlForBitrateTier: fallback selected ${bestOverall.first.quality} for target ${targetKbps}k: ${bestOverall.first.url}")
+            return bestOverall.first.url to bestOverall.second
+        }
+
+        return null
+    }
+
+    /**
      * Choose the best stream URL matching [quality] from a list of download URLs.
      * If the exact quality is not found, it falls back to 320kbps or the highest quality.
      */

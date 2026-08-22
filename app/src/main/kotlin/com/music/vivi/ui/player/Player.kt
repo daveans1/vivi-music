@@ -353,8 +353,9 @@ fun BottomSheetPlayer(
 
     val (audioQuality) = rememberEnumPreference(
         AudioQualityKey,
-        defaultValue = AudioQuality.AUTO
+        defaultValue = AudioQuality.MAX
     )
+    val currentFormat by playerConnection.currentFormat.collectAsState(initial = null)
     val sliderStyle by rememberEnumPreference(SliderStyleKey, SliderStyle.SLIM)
     val squigglySlider by rememberPreference(SquigglySliderKey, defaultValue = false)
     
@@ -2083,12 +2084,25 @@ fun BottomSheetPlayer(
                                                 }
                                             }
                                     )
-                                    Text(
-                                        text = when (audioQuality) {
-                                            AudioQuality.AUTO -> stringResource(R.string.audio_quality_auto)
+                                    val badgeText = when {
+                                        currentFormat != null -> {
+                                            val bitrate = currentFormat?.bitrate ?: 0
+                                            when {
+                                                bitrate >= 193_000 -> stringResource(R.string.audio_quality_max)
+                                                bitrate in 129_000..192_999 -> stringResource(R.string.audio_quality_high)
+                                                bitrate in 65_000..128_999 -> stringResource(R.string.audio_quality_medium)
+                                                else -> stringResource(R.string.audio_quality_low)
+                                            }
+                                        }
+                                        else -> when (audioQuality) {
+                                            AudioQuality.MAX -> stringResource(R.string.audio_quality_max)
                                             AudioQuality.HIGH -> stringResource(R.string.audio_quality_high)
+                                            AudioQuality.MEDIUM -> stringResource(R.string.audio_quality_medium)
                                             AudioQuality.LOW -> stringResource(R.string.audio_quality_low)
-                                        }.uppercase(),
+                                        }
+                                    }
+                                    Text(
+                                        text = badgeText.uppercase(),
                                         style = MaterialTheme.typography.labelSmall.copy(
                                             fontSize = 10.sp,
                                             fontWeight = FontWeight.Bold,

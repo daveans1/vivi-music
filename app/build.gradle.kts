@@ -84,34 +84,50 @@ android {
         }
     }
 
+    val keystoreDir = rootProject.file("keystore")
+    val defaultKeystoreFile = File(keystoreDir, "release.keystore")
+
     signingConfigs {
-        create("persistentDebug") {
-            storeFile = file("persistent-debug.keystore")
-            storePassword = "android"
-            keyAlias = "androiddebugkey"
-            keyPassword = "android"
-        }
         create("release") {
-            storeFile = file("keystore/release.keystore")
-            storePassword = System.getenv("STORE_PASSWORD")
-            keyAlias = System.getenv("KEY_ALIAS")
-            keyPassword = System.getenv("KEY_PASSWORD")
+            val envStorePassword = System.getenv("STORE_PASSWORD")
+            val envKeyAlias = System.getenv("KEY_ALIAS")
+            val envKeyPassword = System.getenv("KEY_PASSWORD")
+
+            if (defaultKeystoreFile.exists() && !envStorePassword.isNullOrBlank()) {
+                storeFile = defaultKeystoreFile
+                storePassword = envStorePassword
+                keyAlias = envKeyAlias ?: "androiddebugkey"
+                keyPassword = envKeyPassword ?: envStorePassword
+            } else if (defaultKeystoreFile.exists()) {
+                storeFile = defaultKeystoreFile
+                storePassword = "android"
+                keyAlias = "androiddebugkey"
+                keyPassword = "android"
+            } else {
+                storeFile = file("${System.getProperty("user.home")}/.android/debug.keystore")
+                storePassword = "android"
+                keyAlias = "androiddebugkey"
+                keyPassword = "android"
+            }
         }
         getByName("debug") {
-            keyAlias = "androiddebugkey"
-            keyPassword = "android"
-            storePassword = "android"
-            storeFile = file("${System.getProperty("user.home")}/.android/debug.keystore")
+            if (defaultKeystoreFile.exists()) {
+                storeFile = defaultKeystoreFile
+                storePassword = "android"
+                keyAlias = "androiddebugkey"
+                keyPassword = "android"
+            } else {
+                storeFile = file("${System.getProperty("user.home")}/.android/debug.keystore")
+                storePassword = "android"
+                keyAlias = "androiddebugkey"
+                keyPassword = "android"
+            }
         }
     }
 
     buildTypes {
         release {
-            signingConfig = if (file("keystore/release.keystore").exists() && !System.getenv("STORE_PASSWORD").isNullOrBlank()) {
-                signingConfigs.getByName("release")
-            } else {
-                signingConfigs.getByName("debug")
-            }
+            signingConfig = signingConfigs.getByName("release")
             isMinifyEnabled = true
             isShrinkResources = true
             isCrunchPngs = false

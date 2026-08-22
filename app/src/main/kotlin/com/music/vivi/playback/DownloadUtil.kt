@@ -23,7 +23,7 @@ import androidx.media3.exoplayer.offline.DownloadManager
 import androidx.media3.exoplayer.offline.DownloadNotificationHelper
 import com.music.innertube.YouTube
 import com.music.vivi.constants.AudioQuality
-import com.music.vivi.constants.AudioQualityKey
+import com.music.vivi.constants.DownloadAudioQualityKey
 import com.music.vivi.constants.IpVersionKey
 import com.music.innertube.models.IpVersion
 import okhttp3.Dns
@@ -68,10 +68,9 @@ constructor(
     @PlayerCache val playerCache: SimpleCache,
 ) {
     private val connectivityManager = context.getSystemService<ConnectivityManager>()!!
-    private val audioQuality by enumPreference(context, AudioQualityKey, AudioQuality.AUTO)
+    private val downloadAudioQuality by enumPreference(context, DownloadAudioQualityKey, AudioQuality.MAX)
     private val ipVersion by enumPreference(context, IpVersionKey, IpVersion.AUTO)
     private val songUrlCache = HashMap<String, Pair<String, Long>>()
-    // Keep a reference to context so we can read DataStore prefs for JioSaavn support
     private val appContext: Context = context
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -122,9 +121,9 @@ constructor(
             val playbackData = runBlocking(Dispatchers.IO) {
                 YTPlayerUtils.playerResponseForPlayback(
                     mediaId,
-                    audioQuality = audioQuality,
+                    audioQuality = downloadAudioQuality,
                     connectivityManager = connectivityManager,
-                    // Pass context so the JioSaavn intercept fires when the toggle is ON
+                    isDownload = true,
                     context = appContext,
                 )
             }.getOrThrow()
