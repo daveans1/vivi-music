@@ -43,15 +43,17 @@ jobs:
         env:
           LASTFM_API_KEY: ${{ secrets.LASTFM_API_KEY }}
           LASTFM_SECRET: ${{ secrets.LASTFM_SECRET }}
+          GRADLE_OPTS: "-Xmx3g -XX:MaxMetaspaceSize=512m -XX:+UseG1GC"
         run: |
-          ./gradlew assembleUniversalGmsRelease --no-configuration-cache --console=plain --warning-mode summary --stacktrace
+          ./gradlew assembleUniversalGmsRelease --no-daemon --no-configuration-cache --console=plain --warning-mode summary
 
       - name: Build Debug APK
         env:
           LASTFM_API_KEY: ${{ secrets.LASTFM_API_KEY }}
           LASTFM_SECRET: ${{ secrets.LASTFM_SECRET }}
+          GRADLE_OPTS: "-Xmx3g -XX:MaxMetaspaceSize=512m -XX:+UseG1GC"
         run: |
-          ./gradlew assembleUniversalGmsDebug --no-configuration-cache --console=plain --warning-mode summary --stacktrace
+          ./gradlew assembleUniversalGmsDebug --no-daemon --no-configuration-cache --console=plain --warning-mode summary
 
       - name: Upload Release APK (Optimized, Zero Lag)
         uses: actions/upload-artifact@v4
