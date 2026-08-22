@@ -2185,9 +2185,6 @@ class MusicService :
         }
         if (events.containsAny(EVENT_TIMELINE_CHANGED, EVENT_POSITION_DISCONTINUITY)) {
             currentMediaMetadata.value = player.currentMetadata
-            if (events.contains(EVENT_TIMELINE_CHANGED)) {
-                _queueDirty = true
-            }
         }
 
         // Widget and Discord RPC updates
@@ -3177,7 +3174,6 @@ class MusicService :
                 Timber.tag(TAG).e(it, "Failed to save player state")
                 reportException(it)
             }
-            _queueDirty = false
         } catch (e: Exception) {
             Timber.tag(TAG).e(e, "Error during queue save operation")
             reportException(e)

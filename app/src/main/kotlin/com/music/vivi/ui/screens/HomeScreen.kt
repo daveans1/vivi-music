@@ -235,7 +235,7 @@ fun CommunityPlaylistCard(
                     Column(modifier = Modifier.fillMaxSize()) {
                         Row(modifier = Modifier.weight(1f)) {
                             AsyncImage(
-                                model = item.songs.getOrNull(0)?.thumbnail?.resize(120, 120),
+                                model = item.songs.getOrNull(0)?.thumbnail?.resize(100, 100),
                                 contentDescription = null,
                                 contentScale = ContentScale.Crop,
                                 modifier = Modifier
@@ -243,7 +243,7 @@ fun CommunityPlaylistCard(
                                     .fillMaxSize()
                             )
                             AsyncImage(
-                                model = item.songs.getOrNull(1)?.thumbnail?.resize(120, 120),
+                                model = item.songs.getOrNull(1)?.thumbnail?.resize(100, 100),
                                 contentDescription = null,
                                 contentScale = ContentScale.Crop,
                                 modifier = Modifier
@@ -253,7 +253,7 @@ fun CommunityPlaylistCard(
                         }
                         Row(modifier = Modifier.weight(1f)) {
                             AsyncImage(
-                                model = item.songs.getOrNull(2)?.thumbnail?.resize(120, 120),
+                                model = item.songs.getOrNull(2)?.thumbnail?.resize(100, 100),
                                 contentDescription = null,
                                 contentScale = ContentScale.Crop,
                                 modifier = Modifier
@@ -261,7 +261,7 @@ fun CommunityPlaylistCard(
                                     .fillMaxSize()
                             )
                             AsyncImage(
-                                model = item.songs.getOrNull(3)?.thumbnail?.resize(120, 120),
+                                model = item.songs.getOrNull(3)?.thumbnail?.resize(100, 100),
                                 contentDescription = null,
                                 contentScale = ContentScale.Crop,
                                 modifier = Modifier
