@@ -267,11 +267,21 @@ fun ShowMediaInfo(videoId: String) {
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
+                        val fileSize = currentFormat?.contentLength?.takeIf { it > 0 }?.let {
+                            Formatter.formatShortFileSize(context, it)
+                        } ?: run {
+                            val bitrate = currentFormat?.bitrate ?: 0
+                            val duration = song?.song?.duration ?: 0
+                            if (bitrate > 0 && duration > 0) {
+                                val estimatedBytes = (bitrate.toLong() * duration) / 8L
+                                Formatter.formatShortFileSize(context, estimatedBytes)
+                            } else {
+                                "N/A"
+                            }
+                        }
                         InfoItem(
                             label = stringResource(R.string.file_size),
-                            value = currentFormat?.contentLength?.let {
-                                Formatter.formatShortFileSize(context, it)
-                            } ?: "N/A",
+                            value = fileSize,
                             modifier = Modifier.weight(1f)
                         )
                         InfoItem(
